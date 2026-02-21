@@ -1,763 +1,655 @@
 ```html
 <!doctype html>
-<html lang="ja">
+<html lang="en">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
-  <title>Pixel Hourglass Timer</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>Falling Blocks Timer</title>
   <style>
     :root{
       --bg:#000;
       --fg:#fff;
       --muted:rgba(255,255,255,.65);
-      --soft:rgba(255,255,255,.18);
+      --thin:rgba(255,255,255,.22);
+      --card:rgba(255,255,255,.06);
+      --pad:16px;
+      --radius:18px;
+      --w: 420px; /* phone-like max width */
     }
-    html,body{
+
+    *{ box-sizing:border-box; }
+    html,body{ height:100%; }
+    body{
       margin:0;
-      height:100%;
       background:var(--bg);
       color:var(--fg);
-      font-family: system-ui, -apple-system, Segoe UI, Roboto, "Hiragino Kaku Gothic ProN", "Noto Sans JP", "Yu Gothic", sans-serif;
+      font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji","Segoe UI Emoji";
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
       overflow:hidden;
-      -webkit-tap-highlight-color: transparent;
       touch-action: manipulation;
     }
 
-    /* Always smartphone-sized layout even on PC */
-    .phone {
-      width: min(420px, 100vw);
-      height: 100vh;
-      margin: 0 auto;
+    .app{
+      height:100%;
+      display:flex;
+      justify-content:center;
+      align-items:stretch;
+      padding: env(safe-area-inset-top) var(--pad) env(safe-area-inset-bottom);
+    }
+
+    .shell{
+      width:min(100%, var(--w));
+      height:100%;
       display:flex;
       flex-direction:column;
+      gap:14px;
+    }
+
+    .topbar{
+      display:flex;
+      justify-content:space-between;
       align-items:center;
-      justify-content:center;
-      position:relative;
-      padding: 18px 14px calc(18px + env(safe-area-inset-bottom));
-      box-sizing:border-box;
+      padding: 10px 2px 0;
+      user-select:none;
+    }
+
+    .brand{
+      font-weight:650;
+      letter-spacing:.08em;
+      font-size:12px;
+      color:var(--muted);
+      text-transform:uppercase;
     }
 
     .screen{
-      width:100%;
-      height:100%;
-      display:none;
-      flex-direction:column;
-      align-items:center;
-      justify-content:center;
-      gap:16px;
+      flex:1;
+      background: transparent;
+      border:1px solid var(--thin);
+      border-radius: var(--radius);
+      padding: 14px;
+      position:relative;
+      overflow:hidden;
     }
-    .screen.active{ display:flex; }
 
+    /* Settings screen */
     .title{
-      font-size:14px;
-      letter-spacing:.08em;
+      margin:2px 0 10px;
+      font-size:16px;
+      font-weight:650;
+      letter-spacing:.02em;
+    }
+
+    .subtitle{
+      margin:0 0 14px;
+      font-size:12px;
       color:var(--muted);
-      margin-top: env(safe-area-inset-top);
-      user-select:none;
+      line-height:1.4;
     }
 
     .grid{
-      width:100%;
       display:grid;
-      grid-template-columns: repeat(3, 1fr);
+      grid-template-columns: 1fr 1fr;
       gap:10px;
-      padding: 10px 6px;
-      box-sizing:border-box;
     }
 
-    .timeBtn{
-      border:1px solid var(--soft);
-      background:transparent;
-      color:var(--fg);
-      padding:14px 10px;
-      border-radius:14px;
+    button{
+      appearance:none;
+      -webkit-appearance:none;
+      border:1px solid var(--thin);
+      background: var(--card);
+      color: var(--fg);
+      border-radius: 14px;
+      padding: 14px 12px;
       font-size:14px;
+      font-weight:650;
       letter-spacing:.02em;
       cursor:pointer;
       user-select:none;
+      transition: transform .06s ease, background .15s ease, border-color .15s ease;
     }
-    .timeBtn:active{ transform: scale(.98); border-color: rgba(255,255,255,.35); }
+    button:active{ transform: scale(.98); }
+    button:hover{ border-color: rgba(255,255,255,.35); }
+    button.primary{
+      background: rgba(255,255,255,.10);
+      border-color: rgba(255,255,255,.35);
+    }
+    button.ghost{
+      background: transparent;
+    }
 
-    /* Timer screen */
-    .canvasWrap{
-      width:100%;
-      flex: 1 1 auto;
+    /* Timer screen layout */
+    .timerHeader{
       display:flex;
-      align-items:center;
-      justify-content:center;
-      position:relative;
+      justify-content:space-between;
+      align-items:flex-start;
+      gap:10px;
+      margin-bottom: 10px;
+    }
+    .timerLabel{
+      font-size:12px;
+      color:var(--muted);
+      letter-spacing:.08em;
+      text-transform:uppercase;
+    }
+    .timerValue{
+      font-size:14px;
+      font-weight:700;
+      letter-spacing:.02em;
+      margin-top:2px;
     }
 
-    /* 900px square internally; scale down to fit phone */
-    .glassWrap{
-      width: min(900px, 100%);
-      aspect-ratio: 1 / 1;
+    .field{
+      position:absolute;
+      left:14px; right:14px;
+      top:58px; bottom:78px;
+      border:1px solid var(--thin);
+      border-radius: 16px;
+      overflow:hidden;
+      background: rgba(255,255,255,.03);
+    }
+
+    .lanes{
+      position:absolute;
+      inset:0;
       display:flex;
-      align-items:center;
-      justify-content:center;
-      transform: rotate(0deg);
-      transition: transform 520ms cubic-bezier(.2,.8,.2,1);
-      will-change: transform;
+      flex-direction:column;
+      justify-content:space-between;
+      padding: 12px;
+      pointer-events:none;
     }
-    .glassWrap.flipped{ transform: rotate(180deg); }
-
-    canvas{
+    .bin{
+      min-height: 44%;
+      display:flex;
+      flex-direction:column;
+      align-items:center;
+      gap:6px;
+      pointer-events:none;
+    }
+    .binLabel{
+      font-size:10px;
+      color:rgba(255,255,255,.55);
+      letter-spacing:.1em;
+      text-transform:uppercase;
+      margin-bottom:6px;
+    }
+    .stack{
       width: 100%;
-      height: 100%;
-      display:block;
-      image-rendering: pixelated;
+      flex:1;
+      display:flex;
+      flex-direction:column;
+      align-items:center;
+      justify-content:flex-start;
+      gap:6px;
+    }
+    .stack.bottom{
+      justify-content:flex-end;
+    }
+
+    .block{
+      width: 18px;
+      height: 18px;
+      background: var(--fg);
+      border-radius: 4px;
+      flex: 0 0 auto;
+    }
+
+    /* Falling block (absolute) */
+    .falling{
+      position:absolute;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 18px;
+      height: 18px;
+      background: var(--fg);
+      border-radius: 4px;
+      will-change: transform, top;
+      pointer-events:none;
+    }
+
+    .hint{
+      position:absolute;
+      left:0; right:0;
+      top: 50%;
+      transform: translateY(-50%);
+      text-align:center;
+      color: rgba(255,255,255,.70);
+      font-size:12px;
+      letter-spacing:.06em;
+      text-transform:uppercase;
+      user-select:none;
+      pointer-events:none;
     }
 
     .controls{
       position:absolute;
-      left:0; right:0;
-      bottom: 18px;
+      left:14px; right:14px;
+      bottom:14px;
       display:flex;
-      align-items:center;
-      justify-content:center;
-      gap:12px;
-      padding: 0 14px;
-      box-sizing:border-box;
-      pointer-events:auto;
+      gap:10px;
     }
-    .ctrlBtn{
-      display:flex;
-      align-items:center;
-      justify-content:center;
-      border:1px solid var(--soft);
-      background:rgba(255,255,255,.03);
-      color:var(--fg);
-      border-radius:999px;
-      padding:10px 14px;
-      font-size:13px;
-      letter-spacing:.06em;
-      cursor:pointer;
-      user-select:none;
-      backdrop-filter: blur(6px);
-      min-width: 88px;
-      text-transform: uppercase;
+    .controls button{
+      flex:1;
+      padding: 14px 12px;
     }
-    .ctrlBtn:active{ transform: scale(.98); }
 
-    .hidden{ display:none !important; }
-    .hint{
-      font-size:12px;
-      color:var(--muted);
-      user-select:none;
+    .overlay{
+      position:absolute;
+      inset:0;
+      background: rgba(0,0,0,.75);
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      padding: 18px;
+    }
+    .overlayCard{
+      width: min(100%, 360px);
+      border:1px solid rgba(255,255,255,.28);
+      border-radius: 18px;
+      background: rgba(255,255,255,.06);
+      padding: 16px;
       text-align:center;
+    }
+    .overlayTitle{
+      font-size:16px;
+      font-weight:800;
+      letter-spacing:.08em;
+      text-transform:uppercase;
+      margin: 2px 0 6px;
+    }
+    .overlaySub{
+      font-size:12px;
+      color: var(--muted);
+      margin: 0 0 14px;
       line-height:1.4;
-      padding:0 10px;
+    }
+    .overlayButtons{
+      display:flex;
+      gap:10px;
+    }
+    .overlayButtons button{ flex:1; }
+
+    /* Utility */
+    .hidden{ display:none !important; }
+
+    /* Make it feel like a phone even on PC */
+    @media (min-width: 760px){
+      .shell{
+        padding: 18px 0;
+      }
+      .screen{
+        box-shadow: 0 20px 60px rgba(0,0,0,.55);
+      }
     }
   </style>
 </head>
 <body>
-  <div class="phone">
-
-    <!-- Screen: Select duration -->
-    <section id="screenSelect" class="screen active" aria-label="タイマー選択">
-      <div class="title">PIXEL HOURGLASS TIMER</div>
-      <div class="grid" role="list">
-        <button class="timeBtn" data-sec="60">60秒</button>
-        <button class="timeBtn" data-sec="120">120秒</button>
-        <button class="timeBtn" data-sec="150">150秒</button>
-        <button class="timeBtn" data-sec="180">180秒</button>
-        <button class="timeBtn" data-sec="300">5分</button>
-        <button class="timeBtn" data-sec="600">10分</button>
+  <div class="app">
+    <div class="shell">
+      <div class="topbar">
+        <div class="brand">Falling Blocks Timer</div>
+        <div class="brand" id="statusText">READY</div>
       </div>
-      <div class="hint">時間をタップすると砂時計へ</div>
-    </section>
 
-    <!-- Screen: Hourglass -->
-    <section id="screenTimer" class="screen" aria-label="砂時計">
-      <div class="canvasWrap">
-        <div id="glassWrap" class="glassWrap" aria-hidden="true">
-          <canvas id="c" width="900" height="900"></canvas>
+      <!-- SETTINGS SCREEN -->
+      <section class="screen" id="settingsScreen">
+        <div class="title">Select Duration</div>
+        <div class="subtitle">
+          Blocks fall from the top pile to the bottom pile.<br/>
+          When all blocks have fallen, the timer ends.
         </div>
 
-        <!-- Controls -->
-        <div id="controls" class="controls">
-          <button id="btnStart" class="ctrlBtn" type="button">START</button>
-          <button id="btnStop" class="ctrlBtn" type="button">STOP</button>
-          <button id="btnBack" class="ctrlBtn" type="button">BACK</button>
-        </div>
-      </div>
-    </section>
+        <div class="grid" id="durationGrid"></div>
 
+        <div style="margin-top:12px; font-size:11px; color:var(--muted); line-height:1.45;">
+          Tip: On mobile, add this page to your Home Screen for a clean full-screen feel.
+        </div>
+      </section>
+
+      <!-- TIMER SCREEN -->
+      <section class="screen hidden" id="timerScreen">
+        <div class="timerHeader">
+          <div>
+            <div class="timerLabel">Duration</div>
+            <div class="timerValue" id="durationText">—</div>
+          </div>
+          <div style="text-align:right;">
+            <div class="timerLabel">Progress</div>
+            <div class="timerValue" id="progressText">0%</div>
+          </div>
+        </div>
+
+        <div class="field" id="field">
+          <div class="lanes">
+            <div class="bin">
+              <div class="binLabel">Top Pile</div>
+              <div class="stack" id="topStack"></div>
+            </div>
+
+            <div class="bin">
+              <div class="binLabel">Bottom Pile</div>
+              <div class="stack bottom" id="bottomStack"></div>
+            </div>
+          </div>
+
+          <div class="hint" id="hint">Press START</div>
+        </div>
+
+        <div class="controls">
+          <button class="primary" id="startBtn">START</button>
+          <button class="ghost" id="backBtn">BACK</button>
+        </div>
+
+        <!-- FINISH OVERLAY -->
+        <div class="overlay hidden" id="finishOverlay">
+          <div class="overlayCard">
+            <div class="overlayTitle">Time's Up</div>
+            <div class="overlaySub">All blocks have fallen.</div>
+            <div class="overlayButtons">
+              <button class="primary" id="restartBtn">RESTART</button>
+              <button class="ghost" id="backBtn2">BACK</button>
+            </div>
+          </div>
+        </div>
+      </section>
+    </div>
   </div>
 
-  <script>
-  (() => {
-    // ========== DOM ==========
-    const screenSelect = document.getElementById('screenSelect');
-    const screenTimer  = document.getElementById('screenTimer');
-    const glassWrap    = document.getElementById('glassWrap');
-    const controls     = document.getElementById('controls');
-    const btnStart     = document.getElementById('btnStart');
-    const btnStop      = document.getElementById('btnStop');
-    const btnBack      = document.getElementById('btnBack');
+<script>
+(() => {
+  // ---------- Config ----------
+  // Fixed number of blocks for a consistent, beautiful look even for 10 minutes.
+  // Each block represents an equal slice of the chosen duration.
+  const BLOCK_COUNT = 48; // balanced for mobile: readable, not too dense
+  const FALL_ANIM_MS = 260;
 
-    const canvas       = document.getElementById('c');
-    const ctx          = canvas.getContext('2d', { alpha:false });
+  const DURATIONS = [
+    { label: "30 sec", seconds: 30 },
+    { label: "60 sec", seconds: 60 },
+    { label: "120 sec", seconds: 120 },
+    { label: "150 sec", seconds: 150 },
+    { label: "180 sec", seconds: 180 },
+    { label: "5 min", seconds: 300 },
+    { label: "10 min", seconds: 600 },
+  ];
 
-    // ========== Constants ==========
-    const SIZE = 900;
-    const PX   = 4;              // 4x4 pixels
-    const STEP = PX;
+  // ---------- Elements ----------
+  const statusText = document.getElementById("statusText");
 
-    const DURATIONS = [60,120,150,180,300,600];
+  const settingsScreen = document.getElementById("settingsScreen");
+  const timerScreen = document.getElementById("timerScreen");
 
-    // Geometry
-    const pad = 70;
-    const topY = pad;
-    const botY = SIZE - pad;
-    const midY = SIZE/2;
-    const cx = SIZE/2;
+  const durationGrid = document.getElementById("durationGrid");
 
-    const maxHalf = (SIZE - pad*2)/2;
-    const neckW = 56;
-    const neckHalf = neckW/2;
-    const neckH = 110;
-    const neckTop = midY - neckH/2;
-    const neckBot = midY + neckH/2;
+  const durationText = document.getElementById("durationText");
+  const progressText = document.getElementById("progressText");
 
-    // Simulation tuning
-    // NOTE: Falling direction is inverted (UPWARD).
-    const gravity = -1600;       // px/s^2 (negative => up)
-    const vyCap = 1900;
-    const vxCap = 260;
+  const field = document.getElementById("field");
+  const topStack = document.getElementById("topStack");
+  const bottomStack = document.getElementById("bottomStack");
+  const hint = document.getElementById("hint");
 
-    // ========== State ==========
-    let selectedSec = 150;
+  const startBtn = document.getElementById("startBtn");
+  const backBtn = document.getElementById("backBtn");
+  const backBtn2 = document.getElementById("backBtn2");
+  const restartBtn = document.getElementById("restartBtn");
 
-    let running = false;
-    let flipping = false;
-    let flipped = false;
+  const finishOverlay = document.getElementById("finishOverlay");
 
-    let startTs = 0;
-    let endTs = 0;
+  // ---------- State ----------
+  let selectedSeconds = null;
+  let running = false;
+  let finished = false;
 
-    // moving blocks
-    const falling = [];          // {x,y,vx,vy}
+  let blocksFallen = 0;
+  let intervalId = null;
+  let startTimeMs = 0;
+  let nextDropIndex = 0;
+  let dropEveryMs = 0;
 
-    // occupancy for the TARGET pile (TOP chamber, because flow is bottom -> top)
-    const occTop = new Set();
-    let topSettled = 0;
+  // ---------- Helpers ----------
+  function pad2(n){ return String(n).padStart(2, "0"); }
+  function formatDuration(sec){
+    if (sec < 60) return `${sec} sec`;
+    const m = Math.floor(sec / 60);
+    const s = sec % 60;
+    if (s === 0) return `${m} min`;
+    return `${m}:${pad2(s)}`;
+  }
 
-    // "inventory" in the source chamber (BOTTOM)
-    let bottomRemaining = 0;
+  function setStatus(s){ statusText.textContent = s; }
 
-    // total blocks to move per run
-    let TOTAL = 0;
+  function showSettings(){
+    stopTimer();
+    selectedSeconds = null;
+    settingsScreen.classList.remove("hidden");
+    timerScreen.classList.add("hidden");
+    setStatus("READY");
+  }
 
-    // release control to guarantee completion by selectedSec
-    let released = 0;
-    let releaseAcc = 0;
+  function showTimer(seconds){
+    stopTimer();
+    selectedSeconds = seconds;
 
-    // ========== Helpers ==========
-    const clamp = (v,a,b)=>Math.max(a,Math.min(b,v));
-    const now = () => performance.now();
+    settingsScreen.classList.add("hidden");
+    timerScreen.classList.remove("hidden");
 
-    function showScreen(which){
-      if(which === 'select'){
-        screenSelect.classList.add('active');
-        screenTimer.classList.remove('active');
-      }else{
-        screenSelect.classList.remove('active');
-        screenTimer.classList.add('active');
-      }
+    durationText.textContent = formatDuration(seconds);
+    resetStacks();
+    updateProgress();
+
+    hint.textContent = "Press START";
+    hint.classList.remove("hidden");
+    finishOverlay.classList.add("hidden");
+    setStatus("READY");
+  }
+
+  function resetStacks(){
+    running = false;
+    finished = false;
+    blocksFallen = 0;
+    nextDropIndex = 0;
+
+    topStack.innerHTML = "";
+    bottomStack.innerHTML = "";
+
+    // Create all blocks in the top stack
+    for (let i = 0; i < BLOCK_COUNT; i++){
+      const b = document.createElement("div");
+      b.className = "block";
+      topStack.appendChild(b);
     }
 
-    function snap(v){ return Math.round(v / STEP) * STEP; }
-
-    function xBoundsAtY(y){
-      let half;
-      if (y <= midY){
-        const tt = (y - topY) / (midY - topY);
-        half = maxHalf - (maxHalf - neckHalf) * tt;
-      } else {
-        const tt = (y - midY) / (botY - midY);
-        half = neckHalf + (maxHalf - neckHalf) * tt;
-      }
-      return { lx: cx - half, rx: cx + half };
-    }
-
-    function inGlass(x,y){
-      if(y < topY || y > botY) return false;
-      const b = xBoundsAtY(y);
-      return (x >= b.lx && x <= b.rx);
-    }
-
-    function inNeck(x,y){
-      return (y >= neckTop && y <= neckBot && Math.abs(x - cx) <= neckHalf);
-    }
-
-    function roundRectStroke(x,y,w,h,r){
-      ctx.beginPath();
-      ctx.moveTo(x+r,y);
-      ctx.arcTo(x+w,y,  x+w,y+h, r);
-      ctx.arcTo(x+w,y+h,x,  y+h, r);
-      ctx.arcTo(x,  y+h,x,  y,   r);
-      ctx.arcTo(x,  y,  x+w,y,   r);
-      ctx.closePath();
-      ctx.stroke();
-    }
-
-    function drawOutline(){
-      ctx.fillStyle = "#000";
-      ctx.fillRect(0,0,SIZE,SIZE);
-
-      ctx.strokeStyle = "#fff";
-      ctx.lineWidth = 3;
-      ctx.lineCap = "round";
-      ctx.lineJoin = "round";
-
-      // frame
-      roundRectStroke(18, 18, SIZE-36, SIZE-36, 44);
-
-      // hourglass border
-      ctx.beginPath();
-      ctx.moveTo(xBoundsAtY(topY).lx, topY);
-      ctx.lineTo(xBoundsAtY(midY).lx, midY);
-      ctx.lineTo(xBoundsAtY(botY).lx, botY);
-      ctx.lineTo(xBoundsAtY(botY).rx, botY);
-      ctx.lineTo(xBoundsAtY(midY).rx, midY);
-      ctx.lineTo(xBoundsAtY(topY).rx, topY);
-      ctx.closePath();
-      ctx.stroke();
-
-      // neck lines
-      ctx.beginPath();
-      ctx.moveTo(cx - neckHalf, neckTop);
-      ctx.lineTo(cx + neckHalf, neckTop);
-      ctx.moveTo(cx - neckHalf, neckBot);
-      ctx.lineTo(cx + neckHalf, neckBot);
-      ctx.stroke();
-
-      // subtle chamber divider feel
-      ctx.globalAlpha = 0.35;
-      ctx.beginPath();
-      ctx.moveTo(xBoundsAtY(midY-6).lx, midY-6);
-      ctx.lineTo(cx - neckHalf, midY-6);
-      ctx.moveTo(cx + neckHalf, midY-6);
-      ctx.lineTo(xBoundsAtY(midY-6).rx, midY-6);
-      ctx.moveTo(xBoundsAtY(midY+6).lx, midY+6);
-      ctx.lineTo(cx - neckHalf, midY+6);
-      ctx.moveTo(cx + neckHalf, midY+6);
-      ctx.lineTo(xBoundsAtY(midY+6).rx, midY+6);
-      ctx.stroke();
-      ctx.globalAlpha = 1;
-    }
-
-    // --- Top pile: "sand" physics with sideways slump (cellular-like) ---
-    // Gravity direction for the PILE should feel like normal gravity inside that chamber.
-    // Since we are filling the TOP chamber, "gravity" means blocks want to go DOWN within the TOP chamber
-    // and will slide diagonally to make a slope.
-    function settleInTopWithSlump(x,y){
-      // snap
-      let sx = snap(x);
-      let sy = snap(y);
-
-      // Keep inside TOP chamber
-      if(sy > neckTop - 8) sy = snap(neckTop - 8);
-      if(sy < topY + 8) sy = snap(topY + 8);
-
-      // Clamp X to glass at this Y
-      const b = xBoundsAtY(sy + PX/2);
-      const minX = snap(b.lx + 10);
-      const maxX = snap(b.rx - 10);
-      sx = clamp(sx, minX, maxX);
-
-      // Drop DOWN (toward neck) until we hit another block or boundary (normal gravity)
-      // i.e. sy increases while still in TOP chamber.
-      while(true){
-        const key = `${sx},${sy}`;
-        if(!inGlass(sx+PX/2, sy+PX/2) || sy >= neckTop - PX - 8){
-          sy = snap(neckTop - PX - 8);
-          break;
-        }
-        if(occTop.has(key)){
-          sy -= STEP; // if occupied, move up a cell
-          continue;
-        }
-
-        const belowY = sy + STEP;
-        const belowKey = `${sx},${belowY}`;
-        const belowInside = (belowY <= neckTop - PX - 8) && inGlass(sx+PX/2, belowY+PX/2);
-        if(!belowInside || occTop.has(belowKey)){
-          break;
-        }
-        sy = belowY;
-      }
-
-      // Place
-      let placedKey = `${sx},${sy}`;
-      if(!occTop.has(placedKey)){
-        occTop.add(placedKey);
-        topSettled++;
-      } else {
-        // nudge sideways if rare collision
-        for(const dx of [STEP, -STEP, STEP*2, -STEP*2]){
-          const nx = sx + dx;
-          const nk = `${nx},${sy}`;
-          if(!occTop.has(nk) && inGlass(nx+PX/2, sy+PX/2) && sy <= neckTop - PX - 8){
-            occTop.add(nk);
-            topSettled++;
-            sx = nx;
-            placedKey = nk;
-            break;
-          }
-        }
-      }
-
-      // Slump: if diagonals are open below, slide randomly left/right
-      // This makes the pile "崩れていく" 느낌.
-      // We run a few relaxation steps to emulate granular slope.
-      let rx = sx, ry = sy;
-      for(let k=0; k<28; k++){
-        const downY = ry + STEP;
-        if(downY > neckTop - PX - 8) break;
-
-        const leftX  = rx - STEP;
-        const rightX = rx + STEP;
-
-        const downKey  = `${rx},${downY}`;
-        const dlKey    = `${leftX},${downY}`;
-        const drKey    = `${rightX},${downY}`;
-
-        const canDown = !occTop.has(downKey) && inGlass(rx+PX/2, downY+PX/2);
-        const canDL   = !occTop.has(dlKey)   && inGlass(leftX+PX/2, downY+PX/2);
-        const canDR   = !occTop.has(drKey)   && inGlass(rightX+PX/2, downY+PX/2);
-
-        if(canDown){
-          // fall straight down (rare because we already dropped, but allow for post-slide holes)
-          occTop.delete(`${rx},${ry}`);
-          ry = downY;
-          occTop.add(`${rx},${ry}`);
-          continue;
-        }
-
-        if(canDL || canDR){
-          const chooseLeft = canDL && canDR ? (Math.random() < 0.5) : canDL;
-          const nx = chooseLeft ? leftX : rightX;
-
-          // remove current, move to diagonal down
-          occTop.delete(`${rx},${ry}`);
-          rx = nx;
-          ry = downY;
-          occTop.add(`${rx},${ry}`);
-          continue;
-        }
-
-        break; // stable
-      }
-    }
-
-    // ========== Initial state in timer screen ==========
-    // Spec: timer screen initial is "sand at bottom" (unchanged visually).
-    // We create TOTAL based on a packed bottom pile, but we do NOT simulate bottom pile blocks individually.
-    // We just store bottomRemaining count and draw it as a packed mass.
-    function computeTotalFromBottomPacked(){
-      // Determine how many blocks fit in a nice bottom pile (bounded & capped)
-      const maxBlocks = 1800;
-      const yStart = botY - 14;
-      const yEnd   = neckBot + 12;
-
-      let count = 0;
-      for(let y = yStart; y >= yEnd && count < maxBlocks; y -= STEP){
-        const b = xBoundsAtY(y);
-        const lx = snap(b.lx + 12);
-        const rx = snap(b.rx - 12);
-        for(let x = lx; x <= rx && count < maxBlocks; x += STEP){
-          const sx = snap(x);
-          const sy = snap(y);
-          if(!inGlass(sx+PX/2, sy+PX/2)) continue;
-          if(sy < neckBot + 8) continue; // bottom chamber only
-          count++;
-        }
-      }
-      return count;
-    }
-
-    // Draw bottom pile mass (packed) for display (no occupancy tracking needed)
-    function drawBottomMass(count){
-      if(count <= 0) return;
-
-      ctx.fillStyle = "#fff";
-      const yStart = botY - 14;
-      const yEnd   = neckBot + 12;
-
-      let drawn = 0;
-      for(let y = yStart; y >= yEnd && drawn < count; y -= STEP){
-        const b = xBoundsAtY(y);
-        const lx = snap(b.lx + 12);
-        const rx = snap(b.rx - 12);
-        for(let x = lx; x <= rx && drawn < count; x += STEP){
-          const sx = snap(x);
-          const sy = snap(y);
-          if(!inGlass(sx+PX/2, sy+PX/2)) continue;
-          ctx.fillRect(sx, sy, PX, PX);
-          drawn++;
-        }
-      }
-    }
-
-    function drawTopPile(){
-      ctx.fillStyle = "#fff";
-      for(const key of occTop){
-        const [x,y] = key.split(',').map(Number);
-        ctx.fillRect(x, y, PX, PX);
-      }
-    }
-
-    function drawFalling(){
-      ctx.fillStyle = "#fff";
-      for(const b of falling){
-        ctx.fillRect(b.x, b.y, PX, PX);
-      }
-    }
-
-    function render(){
-      drawOutline();
-
-      if(!running){
-        // idle: show ALL sand at bottom (spec)
-        drawBottomMass(TOTAL);
-      } else {
-        // running: show remaining at bottom + moved/settled at top + falling stream
-        drawBottomMass(bottomRemaining);
-        drawTopPile();
-        drawFalling();
-      }
-    }
-
-    // ========== Flow (direction inverted: bottom -> top) ==========
-    function emitOneUpward(){
-      if(bottomRemaining <= 0) return;
-
-      // Spawn near neck opening but in bottom chamber, so it "rises" through neck.
-      const xJ = (Math.random() - 0.5) * (neckW * 0.55);
-      const x = snap(cx + xJ);
-      const y = snap(neckBot + 22 + Math.random()*36);
-
-      falling.push({
-        x: clamp(x, 0, SIZE-PX),
-        y: clamp(y, 0, SIZE-PX),
-        vx: (Math.random()-0.5) * 60,
-        vy: 0
-      });
-
-      bottomRemaining--;
-      released++;
-    }
-
-    function beginRun(){
-      running = true;
-
-      const t = now();
-      startTs = t;
-      endTs = t + selectedSec * 1000;
-
-      // reset top chamber pile
-      occTop.clear();
-      topSettled = 0;
-
-      // bottom has all sand to start (we will move it to top)
-      bottomRemaining = TOTAL;
-
-      falling.length = 0;
-      released = 0;
-      releaseAcc = 0;
-
-      // Controls: show STOP/BACK during run, hide START
-      btnStart.classList.add('hidden');
-      btnStop.classList.remove('hidden');
-      btnBack.classList.remove('hidden');
-    }
-
-    function stopRun(keepScene=true){
-      running = false;
-      flipping = false;
-
-      // settle any remaining falling blocks quickly into top (so it doesn't look "stuck")
-      for(const b of falling){
-        // settle at its current x around top chamber (insert with slump)
-        settleInTopWithSlump(b.x, Math.min(b.y, neckTop - 20));
-      }
-      falling.length = 0;
-
-      // If we ended naturally (or STOP), keep current top pile.
-      // When idle spec wants "sand at bottom", but you asked STOP button on timer:
-      // We'll keep the current scene when STOP, and show START again so you can flip/run again.
-      // If you want STOP to reset to bottom-full, replace keepScene=true with false in STOP handler.
-      if(!keepScene){
-        occTop.clear();
-        topSettled = 0;
-      }
-
-      // Controls: show START + BACK, hide STOP
-      btnStart.classList.remove('hidden');
-      btnStop.classList.add('hidden');
-      btnBack.classList.remove('hidden');
-    }
-
-    function update(dt){
-      if(!running) return;
-
-      // Release rate so all blocks move within selectedSec
-      const rate = TOTAL / selectedSec; // blocks/sec
-      releaseAcc += rate * dt;
-      while(releaseAcc >= 1 && bottomRemaining > 0){
-        emitOneUpward();
-        releaseAcc -= 1;
-      }
-
-      // Update falling blocks (move upward)
-      for(let i = falling.length - 1; i >= 0; i--){
-        const b = falling[i];
-
-        // gravity upward
-        b.vy = clamp(b.vy + gravity * dt, -vyCap, vyCap);
-
-        // steer into neck while below it (since we are going up)
-        if(b.y > neckBot){
-          b.vx += (cx - (b.x + PX/2)) * 0.6 * dt;
-        }
-
-        // constrain in neck
-        if(inNeck(b.x + PX/2, b.y + PX/2)){
-          b.x = clamp(b.x, cx - neckHalf + 2, cx + neckHalf - PX - 2);
-          b.vy = Math.min(b.vy, -650); // keep it moving up
-          b.vx *= 0.6;
-        }
-
-        // integrate
-        b.vx = clamp(b.vx + (Math.random()-0.5) * 40 * dt, -vxCap, vxCap);
-        b.x += b.vx * dt;
-        b.y += b.vy * dt;
-
-        // side walls
-        const bb = xBoundsAtY(b.y + PX/2);
-        const minX = bb.lx + 10;
-        const maxX = bb.rx - 10 - PX;
-        b.x = clamp(b.x, minX, maxX);
-
-        // Reached the top chamber region: settle when entering upper area and approaching top pile
-        if(b.y <= neckTop - 12){
-          // settle into top pile with slump (gravity-like sideways crumble)
-          settleInTopWithSlump(b.x, b.y);
-          falling.splice(i,1);
-          continue;
-        }
-
-        // if it goes out of bounds (very top), settle
-        if(b.y < topY + 8){
-          settleInTopWithSlump(b.x, topY + 14);
-          falling.splice(i,1);
-          continue;
-        }
-      }
-
-      const t = now();
-      const allMoved = (bottomRemaining === 0) && (falling.length === 0);
-
-      if(t >= endTs || allMoved){
-        // dump any remaining bottom blocks instantly into top pile to guarantee completion
-        while(bottomRemaining > 0){
-          const xJ = (Math.random() - 0.5) * (maxHalf * 0.9);
-          settleInTopWithSlump(cx + xJ, neckTop - 40);
-          bottomRemaining--;
-        }
-        stopRun(true);
-      }
-    }
-
-    // Main loop
-    let last = now();
-    function tick(){
-      const t = now();
-      const dt = clamp((t - last) / 1000, 0, 0.033);
-      last = t;
-      update(dt);
-      render();
-      requestAnimationFrame(tick);
-    }
-
-    // Flip + start
-    function startWithFlip(){
-      if(flipping || running) return;
-      flipping = true;
-
-      flipped = !flipped;
-      glassWrap.classList.toggle('flipped', flipped);
-
-      const onDone = () => {
-        glassWrap.removeEventListener('transitionend', onDone);
-        beginRun();
-        flipping = false;
-      };
-      glassWrap.addEventListener('transitionend', onDone, { once:true });
-
-      setTimeout(() => {
-        if(flipping){
-          try { glassWrap.removeEventListener('transitionend', onDone); } catch(e){}
-          beginRun();
-          flipping = false;
-        }
-      }, 700);
-    }
-
-    // ========== UI wiring ==========
-    document.querySelectorAll('.timeBtn').forEach(btn => {
-      btn.addEventListener('click', () => {
-        const sec = Number(btn.dataset.sec);
-        if(!DURATIONS.includes(sec)) return;
-        selectedSec = sec;
-
-        showScreen('timer');
-
-        // (Re)initialize hourglass: idle view shows sand at bottom
-        TOTAL = computeTotalFromBottomPacked();
-        bottomRemaining = TOTAL;
-        occTop.clear();
-        falling.length = 0;
-        topSettled = 0;
-
-        running = false;
-        flipping = false;
-
-        // Controls initial: START + BACK visible, STOP hidden
-        btnStart.classList.remove('hidden');
-        btnStop.classList.add('hidden');
-        btnBack.classList.remove('hidden');
-
-        render();
-      }, { passive:true });
+    // Make stacks fit nicely in various heights by scaling block size subtly
+    requestAnimationFrame(() => fitBlockSize());
+  }
+
+  function fitBlockSize(){
+    // Adjust block size to available height so the pile never overflows.
+    const fieldRect = field.getBoundingClientRect();
+    const availableTop = (fieldRect.height * 0.44) - 28; // bin label + spacing
+    const gap = 6;
+    const maxPerPile = BLOCK_COUNT;
+
+    // Solve for size so (size * count) + gap*(count-1) <= availableTop
+    let size = Math.floor((availableTop - gap * (maxPerPile - 1)) / maxPerPile);
+    size = Math.max(10, Math.min(18, size)); // keep it elegant
+
+    const blocks = field.querySelectorAll(".block");
+    blocks.forEach(el => {
+      el.style.width = size + "px";
+      el.style.height = size + "px";
+      el.style.borderRadius = Math.max(3, Math.floor(size * 0.22)) + "px";
     });
+  }
 
-    // START
-    btnStart.addEventListener('click', () => {
-      startWithFlip();
-    }, { passive:true });
+  function updateProgress(){
+    const pct = Math.round((blocksFallen / BLOCK_COUNT) * 100);
+    progressText.textContent = `${pct}%`;
+  }
 
-    // STOP (stop where it is; keeps the current scene and shows START again)
-    btnStop.addEventListener('click', () => {
-      if(running) stopRun(true);
-    }, { passive:true });
+  function stopTimer(){
+    running = false;
+    finished = false;
+    if (intervalId) clearInterval(intervalId);
+    intervalId = null;
+  }
 
-    // BACK (go back to time select)
-    btnBack.addEventListener('click', () => {
-      running = false;
-      flipping = false;
-      showScreen('select');
-    }, { passive:true });
+  function startTimer(){
+    if (!selectedSeconds || running) return;
 
-    // prevent scroll on mobile
-    document.addEventListener('touchmove', (e) => e.preventDefault(), { passive:false });
+    finished = false;
+    running = true;
+    setStatus("RUNNING");
+    hint.classList.add("hidden");
+    finishOverlay.classList.add("hidden");
 
-    // Init
-    tick();
-  })();
-  </script>
+    // Each block drop represents an equal slice of time.
+    dropEveryMs = (selectedSeconds * 1000) / BLOCK_COUNT;
+    startTimeMs = performance.now();
+
+    // Drop one immediately for responsiveness, then proceed.
+    dropOne();
+
+    intervalId = setInterval(() => {
+      if (!running) return;
+
+      // Use time-based pacing to reduce drift.
+      const elapsed = performance.now() - startTimeMs;
+      const shouldHaveDropped = Math.floor(elapsed / dropEveryMs) + 1; // +1 because first drop happened immediately
+      while (nextDropIndex < Math.min(shouldHaveDropped, BLOCK_COUNT)) {
+        dropOne();
+      }
+    }, 60);
+  }
+
+  function dropOne(){
+    if (!running) return;
+    if (nextDropIndex >= BLOCK_COUNT) return;
+
+    const block = topStack.lastElementChild;
+    if (!block) return;
+
+    // Convert to a falling block at the block's current position
+    const blockRect = block.getBoundingClientRect();
+    const fieldRect = field.getBoundingClientRect();
+
+    const falling = document.createElement("div");
+    falling.className = "falling";
+    // Copy size/radius from current block style
+    const computed = getComputedStyle(block);
+    falling.style.width = computed.width;
+    falling.style.height = computed.height;
+    falling.style.borderRadius = computed.borderRadius;
+
+    // Starting Y relative to field
+    const startY = blockRect.top - fieldRect.top;
+    falling.style.top = startY + "px";
+
+    field.appendChild(falling);
+
+    // Remove from top pile visually
+    block.remove();
+
+    // Target Y: just above the bottom stack's next position
+    const bottomRect = bottomStack.getBoundingClientRect();
+    const targetBaseY = bottomRect.bottom - fieldRect.top; // bottom edge within field
+    const size = parseFloat(computed.height);
+    const gap = 6;
+
+    // Stack upward in bottom pile
+    const targetY = targetBaseY - (size + gap) * (blocksFallen + 1);
+
+    // Animate
+    const fallDuration = Math.max(FALL_ANIM_MS, Math.min(520, dropEveryMs * 0.6));
+    falling.style.transition = `top ${fallDuration}ms cubic-bezier(.2,.9,.2,1)`;
+
+    // Force reflow before applying new top
+    void falling.offsetHeight;
+    falling.style.top = targetY + "px";
+
+    // On finish: add a real block into bottom pile and remove the falling node
+    setTimeout(() => {
+      // Add to bottom pile
+      const landed = document.createElement("div");
+      landed.className = "block";
+      landed.style.width = computed.width;
+      landed.style.height = computed.height;
+      landed.style.borderRadius = computed.borderRadius;
+      bottomStack.appendChild(landed);
+
+      falling.remove();
+
+      blocksFallen++;
+      nextDropIndex++;
+      updateProgress();
+
+      if (blocksFallen >= BLOCK_COUNT){
+        finish();
+      }
+    }, fallDuration + 10);
+  }
+
+  function finish(){
+    running = false;
+    finished = true;
+    if (intervalId) clearInterval(intervalId);
+    intervalId = null;
+
+    setStatus("DONE");
+    finishOverlay.classList.remove("hidden");
+  }
+
+  // ---------- Build Settings UI ----------
+  function buildDurationButtons(){
+    durationGrid.innerHTML = "";
+    DURATIONS.forEach((d) => {
+      const btn = document.createElement("button");
+      btn.textContent = d.label.toUpperCase();
+      btn.addEventListener("click", () => showTimer(d.seconds));
+      durationGrid.appendChild(btn);
+    });
+  }
+
+  // ---------- Events ----------
+  startBtn.addEventListener("click", () => {
+    if (!selectedSeconds) return;
+    if (finished){
+      // If finished, start over cleanly
+      resetStacks();
+    }
+    if (!running) startTimer();
+  });
+
+  backBtn.addEventListener("click", showSettings);
+  backBtn2.addEventListener("click", showSettings);
+
+  restartBtn.addEventListener("click", () => {
+    if (!selectedSeconds) return;
+    resetStacks();
+    startTimer();
+  });
+
+  // Refit on resize/orientation change
+  window.addEventListener("resize", () => {
+    if (!timerScreen.classList.contains("hidden")) fitBlockSize();
+  });
+
+  // If the tab is hidden, pause to avoid weird drift
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden && running){
+      stopTimer();
+      hint.textContent = "Paused (tab hidden)";
+      hint.classList.remove("hidden");
+      setStatus("PAUSED");
+    }
+  });
+
+  // ---------- Init ----------
+  buildDurationButtons();
+  showSettings();
+})();
+</script>
 </body>
 </html>
 ```
