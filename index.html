@@ -23,7 +23,7 @@
       touch-action: manipulation;
     }
 
-    /* Always show as smartphone-sized even on PC */
+    /* Always smartphone-sized layout even on PC */
     .phone {
       width: min(420px, 100vw);
       height: 100vh;
@@ -76,10 +76,7 @@
       cursor:pointer;
       user-select:none;
     }
-    .timeBtn:active{
-      transform: scale(.98);
-      border-color: rgba(255,255,255,.35);
-    }
+    .timeBtn:active{ transform: scale(.98); border-color: rgba(255,255,255,.35); }
 
     /* Timer screen */
     .canvasWrap{
@@ -90,15 +87,11 @@
       justify-content:center;
       position:relative;
     }
-    canvas{
-      width: 100%;
-      height: 100%;
-      display:block;
-    }
 
+    /* Hourglass visual area is 900px square internally; scale down to fit phone */
     .glassWrap{
-      width:100%;
-      height:100%;
+      width: min(900px, 100%);
+      aspect-ratio: 1 / 1;
       display:flex;
       align-items:center;
       justify-content:center;
@@ -106,8 +99,13 @@
       transition: transform 520ms cubic-bezier(.2,.8,.2,1);
       will-change: transform;
     }
-    .glassWrap.flipped{
-      transform: rotate(180deg);
+    .glassWrap.flipped{ transform: rotate(180deg); }
+
+    canvas{
+      width: 100%;
+      height: 100%;
+      display:block;
+      image-rendering: pixelated;
     }
 
     .controls{
@@ -139,12 +137,7 @@
     }
     .ctrlBtn:active{ transform: scale(.98); }
 
-    .ctrlIcon{
-      width:16px; height:16px;
-      display:inline-block;
-      position:relative;
-    }
-    /* Play icon */
+    .ctrlIcon{ width:16px; height:16px; display:inline-block; position:relative; }
     .iconPlay::before{
       content:"";
       position:absolute;
@@ -154,7 +147,6 @@
       border-bottom:5px solid transparent;
       border-left:8px solid var(--fg);
     }
-    /* Back/select icon (grid) */
     .iconGrid{
       display:grid;
       grid-template-columns: repeat(2, 6px);
@@ -168,10 +160,7 @@
       box-sizing:border-box;
       opacity:.9;
     }
-
     .hidden{ display:none !important; }
-
-    /* Optional tiny hint */
     .hint{
       font-size:12px;
       color:var(--muted);
@@ -203,7 +192,7 @@
     <section id="screenTimer" class="screen" aria-label="砂時計">
       <div class="canvasWrap">
         <div id="glassWrap" class="glassWrap" aria-hidden="true">
-          <canvas id="c"></canvas>
+          <canvas id="c" width="900" height="900"></canvas>
         </div>
 
         <!-- Controls (appear when NOT running, hide while running) -->
@@ -226,7 +215,7 @@
 
   <script>
   (() => {
-    // ---------- DOM ----------
+    // ========== DOM ==========
     const screenSelect = document.getElementById('screenSelect');
     const screenTimer  = document.getElementById('screenTimer');
     const glassWrap    = document.getElementById('glassWrap');
@@ -234,32 +223,65 @@
     const btnStart     = document.getElementById('btnStart');
     const btnSelect    = document.getElementById('btnSelect');
     const canvas       = document.getElementById('c');
-    const ctx          = canvas.getContext('2d', { alpha: false });
+    const ctx          = canvas.getContext('2d', { alpha:false });
 
-    // ---------- State ----------
+    // ========== Constants ==========
+    const SIZE = 900;         // hourglass image size (900px)
+    const PX   = 4;           // particle block size (4x4)
+    const STEP = PX;          // snap grid
+
     const DURATIONS = [60,120,150,180,300,600];
+
+    // Hourglass geometry within 900x900
+    const pad = 70;
+    const topY = pad;
+    const botY = SIZE - pad;
+    const midY = SIZE/2;
+    const cx = SIZE/2;
+
+    const maxHalf = (SIZE - pad*2)/2;   // widest half-width
+    const neckW = 56;                   // waist opening width
+    const neckHalf = neckW/2;
+    const neckH = 110;                  // neck vertical thickness
+    const neckTop = midY - neckH/2;
+    const neckBot = midY + neckH/2;
+
+    // Simulation tuning
+    const gravity = 1400;               // px/s^2 in 900px space
+    const vyCap = 1800;
+    const vxCap = 250;
+
+    // ========== State ==========
     let selectedSec = 150;
 
     let running = false;
     let flipping = false;
-    let flipped = false;            // visual orientation (CSS)
+    let flipped = false;
+
     let startTs = 0;
     let endTs = 0;
 
-    // Sand particles
-    const particles = [];
-    let P_COUNT = 700;              // will adapt on resize
-    let px = 2;                     // particle pixel size (will adapt)
-    let gravity = 110;              // px/s^2
-    let fallSpeedCap = 240;         // px/s
+    // Blocks
+    // falling blocks: {x,y,vx,vy}
+    const falling = [];
 
-    // Hourglass geometry in canvas coordinates
-    let W=0,H=0, cx=0, cy=0;
-    let pad=0, topY=0, botY=0, midY=0;
-    let leftX=0, rightX=0;
-    let neckW=0, neckH=0;
+    // Bottom pile occupancy: key "x,y" => true (snapped to 4px)
+    const occ = new Set();
 
-    // ---------- Helpers ----------
+    // Count of settled blocks (bottom pile)
+    let settledCount = 0;
+
+    // Total blocks we will move each run
+    let TOTAL = 0;
+
+    // Release control (ensures all blocks move by selected time)
+    let released = 0;        // how many blocks have been emitted from top
+    let releaseAcc = 0;      // fractional accumulator
+
+    // Top chamber "inventory" (just counts; positions are generated on release)
+    let topRemaining = 0;
+
+    // ========== Helpers ==========
     const clamp = (v,a,b)=>Math.max(a,Math.min(b,v));
     const now = () => performance.now();
 
@@ -277,63 +299,19 @@
       controls.classList.toggle('hidden', !v);
     }
 
-    function resize(){
-      // Canvas should fill available space inside timer screen
-      const wrap = document.querySelector('.canvasWrap');
-      const rect = wrap.getBoundingClientRect();
-
-      // Use devicePixelRatio for crisp lines
-      const dpr = Math.max(1, Math.min(3, window.devicePixelRatio || 1));
-      canvas.width  = Math.floor(rect.width  * dpr);
-      canvas.height = Math.floor(rect.height * dpr);
-      canvas.style.width  = rect.width + 'px';
-      canvas.style.height = rect.height + 'px';
-      ctx.setTransform(dpr,0,0,dpr,0,0);
-
-      W = rect.width;
-      H = rect.height;
-
-      cx = W/2;
-      cy = H/2;
-
-      pad = Math.min(W,H) * 0.08;
-      topY = pad;
-      botY = H - pad;
-      midY = H/2;
-
-      leftX  = pad;
-      rightX = W - pad;
-
-      neckW = Math.min(W,H) * 0.07;    // narrow waist width
-      neckH = Math.min(W,H) * 0.10;    // waist vertical region
-
-      // Particles adapt to size
-      px = clamp(Math.round(Math.min(W,H) / 220), 2, 4);
-      P_COUNT = Math.floor((Math.min(W,H) * 7)); // scale-ish
-      P_COUNT = clamp(P_COUNT, 520, 1200);
-
-      // Reset to "sand at bottom" when entering timer screen OR on resize if not running
-      if(!running && screenTimer.classList.contains('active')){
-        makeSandBottom();
-      }
+    function snap(v){
+      return Math.round(v / STEP) * STEP;
     }
 
-    // Hourglass boundary: left/right x at given y
-    // We create a symmetric hourglass using two straight lines meeting at neck.
     function xBoundsAtY(y){
-      // normalized t: 0 top -> 1 bottom
-      const t = (y - topY) / (botY - topY);
-      const maxHalf = (rightX - leftX) / 2;
-      const minHalf = neckW / 2;
-
-      // Piecewise linear: top half narrows to neck, bottom half widens
+      // symmetric linear taper to neck at mid, then widen
       let half;
       if (y <= midY){
         const tt = (y - topY) / (midY - topY);
-        half = maxHalf - (maxHalf - minHalf) * tt;
+        half = maxHalf - (maxHalf - neckHalf) * tt;
       } else {
         const tt = (y - midY) / (botY - midY);
-        half = minHalf + (maxHalf - minHalf) * tt;
+        half = neckHalf + (maxHalf - neckHalf) * tt;
       }
       return { lx: cx - half, rx: cx + half };
     }
@@ -341,66 +319,11 @@
     function inGlass(x,y){
       if(y < topY || y > botY) return false;
       const b = xBoundsAtY(y);
-      return x >= b.lx && x <= b.rx;
+      return (x >= b.lx && x <= b.rx);
     }
 
     function inNeck(x,y){
-      const neckTop = midY - neckH/2;
-      const neckBot = midY + neckH/2;
-      return (y >= neckTop && y <= neckBot && Math.abs(x - cx) <= neckW/2);
-    }
-
-    function drawHourglassOutline(){
-      ctx.save();
-      ctx.clearRect(0,0,W,H);
-
-      // Background black
-      ctx.fillStyle = "#000";
-      ctx.fillRect(0,0,W,H);
-
-      // Outline white
-      ctx.strokeStyle = "#fff";
-      ctx.lineWidth = Math.max(2, Math.min(3, Math.min(W,H)/220));
-      ctx.lineCap = "round";
-      ctx.lineJoin = "round";
-
-      // Outer frame (simple rounded rectangle-ish)
-      const framePad = pad * 0.4;
-      const r = 18;
-      const fx = framePad, fy = framePad;
-      const fw = W - framePad*2, fh = H - framePad*2;
-      roundRectStroke(fx, fy, fw, fh, Math.min(r, fw*0.07, fh*0.07));
-
-      // Hourglass shape
-      ctx.beginPath();
-      // left side top -> neck
-      ctx.moveTo(xBoundsAtY(topY).lx, topY);
-      ctx.lineTo(xBoundsAtY(midY).lx, midY);
-      // left side neck -> bottom
-      ctx.lineTo(xBoundsAtY(botY).lx, botY);
-
-      // bottom curve to right
-      ctx.lineTo(xBoundsAtY(botY).rx, botY);
-
-      // right side bottom -> neck -> top
-      ctx.lineTo(xBoundsAtY(midY).rx, midY);
-      ctx.lineTo(xBoundsAtY(topY).rx, topY);
-
-      // close top line
-      ctx.closePath();
-      ctx.stroke();
-
-      // neck emphasis
-      ctx.beginPath();
-      const neckTop = midY - neckH/2;
-      const neckBot = midY + neckH/2;
-      ctx.moveTo(cx - neckW/2, neckTop);
-      ctx.lineTo(cx + neckW/2, neckTop);
-      ctx.moveTo(cx - neckW/2, neckBot);
-      ctx.lineTo(cx + neckW/2, neckBot);
-      ctx.stroke();
-
-      ctx.restore();
+      return (y >= neckTop && y <= neckBot && Math.abs(x - cx) <= neckHalf);
     }
 
     function roundRectStroke(x,y,w,h,r){
@@ -414,86 +337,147 @@
       ctx.stroke();
     }
 
-    function drawSand(){
-      ctx.save();
+    function drawOutline(){
+      // black background
+      ctx.fillStyle = "#000";
+      ctx.fillRect(0,0,SIZE,SIZE);
+
+      ctx.strokeStyle = "#fff";
+      ctx.lineWidth = 3;
+      ctx.lineCap = "round";
+      ctx.lineJoin = "round";
+
+      // outer frame
+      roundRectStroke(18, 18, SIZE-36, SIZE-36, 44);
+
+      // hourglass border
+      ctx.beginPath();
+      ctx.moveTo(xBoundsAtY(topY).lx, topY);
+      ctx.lineTo(xBoundsAtY(midY).lx, midY);
+      ctx.lineTo(xBoundsAtY(botY).lx, botY);
+      ctx.lineTo(xBoundsAtY(botY).rx, botY);
+      ctx.lineTo(xBoundsAtY(midY).rx, midY);
+      ctx.lineTo(xBoundsAtY(topY).rx, topY);
+      ctx.closePath();
+      ctx.stroke();
+
+      // "separated space" feel: draw a thin horizontal divider near neck edges
+      // and emphasize the neck opening lines
+      ctx.beginPath();
+      ctx.moveTo(cx - neckHalf, neckTop);
+      ctx.lineTo(cx + neckHalf, neckTop);
+      ctx.moveTo(cx - neckHalf, neckBot);
+      ctx.lineTo(cx + neckHalf, neckBot);
+      ctx.stroke();
+
+      // subtle divider lines in the chambers (optional but helps "split")
+      ctx.globalAlpha = 0.35;
+      ctx.beginPath();
+      ctx.moveTo(xBoundsAtY(midY-6).lx, midY-6);
+      ctx.lineTo(cx - neckHalf, midY-6);
+      ctx.moveTo(cx + neckHalf, midY-6);
+      ctx.lineTo(xBoundsAtY(midY-6).rx, midY-6);
+      ctx.moveTo(xBoundsAtY(midY+6).lx, midY+6);
+      ctx.lineTo(cx - neckHalf, midY+6);
+      ctx.moveTo(cx + neckHalf, midY+6);
+      ctx.lineTo(xBoundsAtY(midY+6).rx, midY+6);
+      ctx.stroke();
+      ctx.globalAlpha = 1;
+    }
+
+    function drawBlocks(){
       ctx.fillStyle = "#fff";
-      // pixels (small squares)
-      for(const p of particles){
-        ctx.fillRect(p.x, p.y, px, px);
+
+      // Bottom pile (settled) from occupancy set
+      for(const key of occ){
+        const [x,y] = key.split(',').map(Number);
+        ctx.fillRect(x, y, PX, PX);
       }
-      ctx.restore();
-    }
 
-    function makeSandBottom(){
-      particles.length = 0;
-      // Fill lower chamber with packed pixels
-      // We'll stack from bottom up within bounds
-      const step = px + 1;
-      const yStart = botY - px - 2;
-      const yEnd   = midY + neckH/2 + 6;
+      // Falling blocks
+      for(const b of falling){
+        ctx.fillRect(b.x, b.y, PX, PX);
+      }
 
-      for(let y = yStart; y >= yEnd && particles.length < P_COUNT; y -= step){
+      // Top chamber "remaining" is visualized by packing a static pile (not individually simulated)
+      // We draw it as a compact block mass so it looks like pixels are "stored" up top.
+      if(!running){
+        // when not running we show "sand at bottom" only (spec initial)
+        return;
+      }
+      // while running, show remaining pile in top chamber (simple packed rows)
+      const remaining = topRemaining;
+      if(remaining <= 0) return;
+
+      const yStart = topY + 16;
+      const yEnd = neckTop - 10;
+
+      let drawn = 0;
+      for(let y = yEnd; y >= yStart && drawn < remaining; y -= STEP){
         const b = xBoundsAtY(y);
-        // keep slightly inside outline
-        const lx = b.lx + 6;
-        const rx = b.rx - 6;
-
-        for(let x = lx; x <= rx && particles.length < P_COUNT; x += step){
-          // add some randomness to avoid perfect grid
-          const jx = x + (Math.random()*1.2 - 0.6);
-          const jy = y + (Math.random()*1.2 - 0.6);
-          particles.push({ x: jx, y: jy, vx: 0, vy: 0, settled: true });
+        const lx = b.lx + 10;
+        const rx = b.rx - 10;
+        for(let x = lx; x <= rx && drawn < remaining; x += STEP){
+          const sx = snap(x);
+          const sy = snap(y);
+          // don't draw inside neck
+          if(inNeck(sx+PX/2, sy+PX/2)) continue;
+          ctx.fillRect(sx, sy, PX, PX);
+          drawn++;
         }
       }
     }
 
-    function rotateParticles180(){
-      // rotation around center of hourglass canvas area
-      for(const p of particles){
-        const dx = (p.x + px/2) - cx;
-        const dy = (p.y + px/2) - cy;
-        const nx = cx - dx - px/2;
-        const ny = cy - dy - px/2;
-        p.x = nx;
-        p.y = ny;
-        // velocities invert
-        p.vx *= -1;
-        p.vy *= -1;
-      }
+    function resetAll(){
+      running = false;
+      flipping = false;
+      released = 0;
+      releaseAcc = 0;
+      topRemaining = 0;
+      settledCount = 0;
+      falling.length = 0;
+      occ.clear();
+      setControlsVisible(true);
+      glassWrap.classList.toggle('flipped', flipped); // keep visual state
+      render();
     }
 
-    function startWithFlip(){
-      if(flipping || running) return;
+    // Pack all sand at bottom (initial state in timer screen)
+    function packBottomAll(){
+      occ.clear();
+      falling.length = 0;
+      settledCount = 0;
 
-      flipping = true;
+      // estimate TOTAL based on bottom chamber usable area; keep it stable per session
+      // We'll fill up to a modest height for nice look.
+      const maxBlocks = 1800; // cap for performance
+      const yStart = botY - 14;
+      const yEnd   = midY + neckH/2 + 10;
 
-      // visual flip
-      flipped = !flipped;
-      glassWrap.classList.toggle('flipped', flipped);
-
-      // Once flip transition ends, begin run
-      // Use once:true, but safe if called rapidly
-      const onDone = () => {
-        glassWrap.removeEventListener('transitionend', onDone);
-        // Physically rotate particles to match the visual flip,
-        // so sand that was bottom becomes top ready to fall.
-        rotateParticles180();
-        beginRun();
-        flipping = false;
-      };
-      glassWrap.addEventListener('transitionend', onDone, { once: true });
-
-      // Fallback if transitionend doesn't fire
-      setTimeout(() => {
-        if(flipping){
-          try { glassWrap.removeEventListener('transitionend', onDone); } catch(e){}
-          rotateParticles180();
-          beginRun();
-          flipping = false;
+      let count = 0;
+      for(let y = yStart; y >= yEnd && count < maxBlocks; y -= STEP){
+        const b = xBoundsAtY(y);
+        const lx = snap(b.lx + 12);
+        const rx = snap(b.rx - 12);
+        for(let x = lx; x <= rx && count < maxBlocks; x += STEP){
+          const sx = snap(x);
+          const sy = snap(y);
+          if(!inGlass(sx+PX/2, sy+PX/2)) continue;
+          // only bottom chamber
+          if(sy < neckBot + 8) continue;
+          occ.add(`${sx},${sy}`);
+          count++;
         }
-      }, 700);
+      }
+      TOTAL = count;
+      settledCount = count;
+
+      // in this state, everything is in bottom, top is empty
+      topRemaining = 0;
+      released = TOTAL;
     }
 
+    // Start a run: all blocks should move from TOP to BOTTOM within selectedSec
     function beginRun(){
       running = true;
       setControlsVisible(false);
@@ -502,107 +486,196 @@
       startTs = t;
       endTs = t + selectedSec * 1000;
 
-      // Unsettle particles in upper chamber so they can fall
-      for(const p of particles){
-        p.settled = false;
-        // tiny jitter so it feels alive
-        p.vx = (Math.random()-0.5) * 10;
-        p.vy = (Math.random()) * 5;
-      }
+      // Move all sand to TOP chamber inventory (visual pile)
+      // and clear bottom pile to accumulate during run.
+      occ.clear();
+      falling.length = 0;
+
+      settledCount = 0;
+      released = 0;
+      releaseAcc = 0;
+
+      topRemaining = TOTAL;
     }
 
-    function stopRun(){
+    function stopRunAndShowControls(){
       running = false;
-      // Let everything settle at bottom quickly (soft snap)
-      for(const p of particles){
-        p.vx = 0; p.vy = 0;
-        p.settled = true;
-      }
       setControlsVisible(true);
+
+      // If any blocks still falling, instantly settle them to guarantee "all moved" feel
+      for(const b of falling){
+        settleBlock(b.x, b.y);
+      }
+      falling.length = 0;
+
+      topRemaining = 0;        // all moved
+      released = TOTAL;
+      releaseAcc = 0;
+    }
+
+    // Spawn one block from upper chamber into the falling stream
+    function emitOne(){
+      if(topRemaining <= 0) return;
+
+      // Emit near center, slightly jitter, above neck so it visibly falls
+      const xJ = (Math.random() - 0.5) * (neckW * 0.55);
+      const x = snap(cx + xJ);
+      const y = snap(neckTop - 28 - Math.random()*32);
+
+      falling.push({
+        x: clamp(x, 0, SIZE-PX),
+        y: clamp(y, 0, SIZE-PX),
+        vx: (Math.random()-0.5) * 60,
+        vy: 0
+      });
+
+      topRemaining--;
+      released++;
+    }
+
+    // Find the first collision position and settle into occupancy
+    function settleBlock(x,y){
+      // Snap to grid
+      let sx = snap(x);
+      let sy = snap(y);
+
+      // Keep within bottom chamber and inside glass
+      if(sy < neckBot + 8) sy = snap(neckBot + 8);
+      sy = clamp(sy, 0, SIZE-PX);
+
+      // Clamp x inside walls for this y
+      const b = xBoundsAtY(sy + PX/2);
+      const minX = snap(b.lx + 10);
+      const maxX = snap(b.rx - 10);
+      sx = clamp(sx, minX, maxX);
+
+      // Drop down (increase y) until it rests on something or bottom boundary
+      // But we settle on the "pile" upward from bottom, so we should drop until collision.
+      while(true){
+        const key = `${sx},${sy}`;
+        if(!inGlass(sx+PX/2, sy+PX/2) || sy > botY - PX - 6){
+          sy = snap(botY - PX - 6);
+          break;
+        }
+        // if occupied, move up one cell
+        if(occ.has(key)){
+          sy -= STEP;
+          continue;
+        }
+        // check the cell below: if below is out of glass OR occupied OR beyond bottom => rest here
+        const belowY = sy + STEP;
+        if(belowY > botY - PX - 6){
+          break;
+        }
+        const belowKey = `${sx},${belowY}`;
+        if(!inGlass(sx+PX/2, belowY+PX/2) || occ.has(belowKey)){
+          break;
+        }
+        // otherwise fall one step
+        sy = belowY;
+      }
+
+      const finalKey = `${sx},${sy}`;
+      if(!occ.has(finalKey)){
+        occ.add(finalKey);
+        settledCount++;
+      }else{
+        // rare: if already occupied, try nudge sideways a bit
+        for(const dx of [STEP, -STEP, STEP*2, -STEP*2]){
+          const nx = sx + dx;
+          const nk = `${nx},${sy}`;
+          if(!occ.has(nk) && inGlass(nx+PX/2, sy+PX/2)){
+            occ.add(nk);
+            settledCount++;
+            return;
+          }
+        }
+      }
     }
 
     function update(dt){
-      // dt in seconds
       if(!running) return;
 
-      // Countdown end
+      // Release rate ensures ALL blocks move within selected time
+      const rate = TOTAL / selectedSec;        // blocks per second
+      releaseAcc += rate * dt;
+      while(releaseAcc >= 1 && topRemaining > 0){
+        emitOne();
+        releaseAcc -= 1;
+      }
+
+      // Update falling blocks
+      for(let i = falling.length - 1; i >= 0; i--){
+        const b = falling[i];
+
+        b.vy = clamp(b.vy + gravity * dt, -vyCap, vyCap);
+
+        // steer into neck if above it
+        if(b.y < neckTop){
+          b.vx += (cx - (b.x + PX/2)) * 0.6 * dt;
+        }
+
+        // constrain while in neck (tight)
+        if(inNeck(b.x + PX/2, b.y + PX/2)){
+          b.x = clamp(b.x, cx - neckHalf + 2, cx + neckHalf - PX - 2);
+          b.vy = Math.max(b.vy, 650);
+          b.vx *= 0.6;
+        }
+
+        // integrate
+        b.vx = clamp(b.vx + (Math.random()-0.5) * 40 * dt, -vxCap, vxCap);
+        b.x += b.vx * dt;
+        b.y += b.vy * dt;
+
+        // walls constraint
+        const bb = xBoundsAtY(b.y + PX/2);
+        const minX = bb.lx + 10;
+        const maxX = bb.rx - 10 - PX;
+        b.x = clamp(b.x, minX, maxX);
+
+        // bottom chamber collision: if at/below bottom boundary OR hits pile, settle
+        // Check snapped position and below cell
+        if(b.y + PX >= botY - 6){
+          settleBlock(b.x, b.y);
+          falling.splice(i,1);
+          continue;
+        }
+
+        if(b.y > neckBot + 8){
+          const sx = snap(b.x);
+          const sy = snap(b.y);
+          const belowKey = `${sx},${sy + STEP}`;
+          // if the cell below is occupied, settle here
+          if(occ.has(belowKey)){
+            settleBlock(sx, sy);
+            falling.splice(i,1);
+            continue;
+          }
+        }
+      }
+
+      // End condition:
+      // - time reached OR all blocks settled in bottom
       const t = now();
-      if(t >= endTs){
-        // ensure sand is bottom-ish by letting a few frames settle
-        stopRun();
-        return;
-      }
+      const allMoved = (settledCount >= TOTAL) && (topRemaining === 0) && (falling.length === 0);
 
-      // Simple particle “fall” simulation inside hourglass
-      const neckTop = midY - neckH/2;
-      const neckBot = midY + neckH/2;
-
-      for(const p of particles){
-        if(p.settled) continue;
-
-        // Gravity
-        p.vy = clamp(p.vy + gravity * dt, -fallSpeedCap, fallSpeedCap);
-
-        // Mild horizontal drift, reduced in neck
-        const drift = inNeck(p.x, p.y) ? 0.12 : 0.5;
-        p.vx += (Math.random() - 0.5) * drift;
-
-        // Cap vx
-        p.vx = clamp(p.vx, -60, 60);
-
-        // Integrate
-        p.x += p.vx * dt;
-        p.y += p.vy * dt;
-
-        // Boundaries: keep inside glass
-        if(p.y < topY + 3){
-          p.y = topY + 3; p.vy *= -0.2;
+      if(t >= endTs || allMoved){
+        // Guarantee all moved on end: dump remaining into pile
+        while(topRemaining > 0){
+          // settle directly into bottom without animation to finish cleanly
+          const xJ = (Math.random() - 0.5) * (maxHalf * 0.9);
+          settleBlock(cx + xJ, neckBot + 30);
+          topRemaining--;
         }
-
-        // If in upper funnel, steer toward neck to create “stream”
-        if(p.y < neckTop){
-          const steer = (cx - p.x) * 0.02;
-          p.vx += steer;
-        }
-
-        // Constrain by side walls at current y
-        const b = xBoundsAtY(p.y);
-        const margin = 4;
-        const minX = b.lx + margin;
-        const maxX = b.rx - margin;
-
-        if(p.x < minX){
-          p.x = minX; p.vx *= -0.2;
-        }else if(p.x > maxX){
-          p.x = maxX; p.vx *= -0.2;
-        }
-
-        // Neck pinch: force x inside neck
-        if(p.y >= neckTop && p.y <= neckBot){
-          p.x = clamp(p.x, cx - neckW/2 + 2, cx + neckW/2 - 2);
-          // speed up slightly through neck
-          p.vy = Math.max(p.vy, 70);
-        }
-
-        // Bottom settle
-        if(p.y > botY - px - 4){
-          p.y = botY - px - 4;
-          p.vx = 0; p.vy = 0;
-          p.settled = true;
-        }
-      }
-
-      // If most particles settled, end early and show icons
-      let settledCount = 0;
-      for(const p of particles) if(p.settled) settledCount++;
-      if(settledCount / particles.length > 0.985){
-        stopRun();
+        // settle any stragglers
+        stopRunAndShowControls();
       }
     }
 
     function render(){
-      drawHourglassOutline();
-      drawSand();
+      drawOutline();
+      // draw top pile only while running; initial timer screen should show bottom-full.
+      drawBlocks();
     }
 
     // Main loop
@@ -616,27 +689,50 @@
       requestAnimationFrame(tick);
     }
 
-    // ---------- UI wiring ----------
+    // Flip + start flow
+    function startWithFlip(){
+      if(flipping || running) return;
+      flipping = true;
+
+      flipped = !flipped;
+      glassWrap.classList.toggle('flipped', flipped);
+
+      const onDone = () => {
+        glassWrap.removeEventListener('transitionend', onDone);
+        // After flip, begin run where sand starts in TOP and ends in BOTTOM
+        beginRun();
+        flipping = false;
+      };
+      glassWrap.addEventListener('transitionend', onDone, { once:true });
+
+      // Fallback
+      setTimeout(() => {
+        if(flipping){
+          try { glassWrap.removeEventListener('transitionend', onDone); } catch(e){}
+          beginRun();
+          flipping = false;
+        }
+      }, 700);
+    }
+
+    // ========== UI wiring ==========
     document.querySelectorAll('.timeBtn').forEach(btn => {
       btn.addEventListener('click', () => {
         const sec = Number(btn.dataset.sec);
         if(!DURATIONS.includes(sec)) return;
         selectedSec = sec;
 
-        // move to hourglass screen
         showScreen('timer');
 
-        // ensure hourglass starts with sand at bottom
-        running = false;
-        flipping = false;
-        setControlsVisible(true);
-        makeSandBottom();
+        // Initial timer screen: sand is already at bottom (spec)
+        resetAll();
+        packBottomAll();
         render();
       }, { passive:true });
     });
 
     btnStart.addEventListener('click', () => {
-      // Start icon click/tap -> flip clockwise and start; icons disappear while running
+      // Start icon -> flip clockwise and start; icons disappear while running
       startWithFlip();
     }, { passive:true });
 
@@ -648,20 +744,11 @@
       showScreen('select');
     }, { passive:true });
 
-    // Reload -> naturally returns to selection (default screen is select)
-
-    // Prevent accidental scroll on mobile
-    document.addEventListener('touchmove', (e) => {
-      e.preventDefault();
-    }, { passive:false });
-
-    // Resize handling
-    window.addEventListener('resize', resize);
+    // prevent scroll on mobile
+    document.addEventListener('touchmove', (e) => e.preventDefault(), { passive:false });
 
     // Init
-    resize();
-    makeSandBottom();
-    render();
+    // (Reload naturally returns to selection screen)
     tick();
   })();
   </script>
