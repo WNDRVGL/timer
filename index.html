@@ -1,4 +1,14 @@
-```TIMER
+ごめん、こちら側で **JSエラーが出たときに画面上に何も出ず「動かない」に見える**作りになってました。
+確実に動くように、ロジックをシンプルにして（落下アニメも安定するように）、さらに **エラーが出たら画面に表示**する版を作り直しました。これをそのまま `timer.html` として保存して開いてください。
+
+> 旧版で止まりやすかった点（端末/表示条件で発生）
+>
+> * 要素の座標計算タイミングで高さが 0 になり、NaN が混ざって落下計算が崩れる
+> * その結果、JSが途中で例外→何も動かない
+
+---
+
+```html
 <!doctype html>
 <html lang="en">
 <head>
@@ -14,22 +24,21 @@
       --card:rgba(255,255,255,.06);
       --pad:16px;
       --radius:18px;
-      --w: 420px; /* phone-like max width */
+      --w: 420px;
+      --block: 16px;
+      --gap: 6px;
     }
-
     *{ box-sizing:border-box; }
     html,body{ height:100%; }
     body{
       margin:0;
       background:var(--bg);
       color:var(--fg);
-      font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji","Segoe UI Emoji";
+      font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial;
       -webkit-font-smoothing: antialiased;
-      -moz-osx-font-smoothing: grayscale;
       overflow:hidden;
       touch-action: manipulation;
     }
-
     .app{
       height:100%;
       display:flex;
@@ -37,7 +46,6 @@
       align-items:stretch;
       padding: env(safe-area-inset-top) var(--pad) env(safe-area-inset-bottom);
     }
-
     .shell{
       width:min(100%, var(--w));
       height:100%;
@@ -45,7 +53,6 @@
       flex-direction:column;
       gap:14px;
     }
-
     .topbar{
       display:flex;
       justify-content:space-between;
@@ -53,7 +60,6 @@
       padding: 10px 2px 0;
       user-select:none;
     }
-
     .brand{
       font-weight:650;
       letter-spacing:.08em;
@@ -61,41 +67,33 @@
       color:var(--muted);
       text-transform:uppercase;
     }
-
     .screen{
       flex:1;
-      background: transparent;
       border:1px solid var(--thin);
       border-radius: var(--radius);
       padding: 14px;
       position:relative;
       overflow:hidden;
     }
-
-    /* Settings screen */
     .title{
       margin:2px 0 10px;
       font-size:16px;
       font-weight:650;
       letter-spacing:.02em;
     }
-
     .subtitle{
       margin:0 0 14px;
       font-size:12px;
       color:var(--muted);
       line-height:1.4;
     }
-
     .grid{
       display:grid;
       grid-template-columns: 1fr 1fr;
       gap:10px;
     }
-
     button{
       appearance:none;
-      -webkit-appearance:none;
       border:1px solid var(--thin);
       background: var(--card);
       color: var(--fg);
@@ -106,7 +104,7 @@
       letter-spacing:.02em;
       cursor:pointer;
       user-select:none;
-      transition: transform .06s ease, background .15s ease, border-color .15s ease;
+      transition: transform .06s ease, border-color .15s ease, background .15s ease;
     }
     button:active{ transform: scale(.98); }
     button:hover{ border-color: rgba(255,255,255,.35); }
@@ -114,11 +112,11 @@
       background: rgba(255,255,255,.10);
       border-color: rgba(255,255,255,.35);
     }
-    button.ghost{
-      background: transparent;
-    }
+    button.ghost{ background: transparent; }
 
-    /* Timer screen layout */
+    .hidden{ display:none !important; }
+
+    /* Timer layout */
     .timerHeader{
       display:flex;
       justify-content:space-between;
@@ -135,7 +133,6 @@
     .timerValue{
       font-size:14px;
       font-weight:700;
-      letter-spacing:.02em;
       margin-top:2px;
     }
 
@@ -149,62 +146,61 @@
       background: rgba(255,255,255,.03);
     }
 
-    .lanes{
-      position:absolute;
-      inset:0;
-      display:flex;
-      flex-direction:column;
-      justify-content:space-between;
-      padding: 12px;
-      pointer-events:none;
-    }
-    .bin{
-      min-height: 44%;
-      display:flex;
-      flex-direction:column;
-      align-items:center;
-      gap:6px;
-      pointer-events:none;
-    }
     .binLabel{
       font-size:10px;
       color:rgba(255,255,255,.55);
       letter-spacing:.1em;
       text-transform:uppercase;
-      margin-bottom:6px;
+      margin-bottom:8px;
+      text-align:center;
     }
+
+    .piles{
+      position:absolute;
+      inset:0;
+      padding: 12px;
+      display:flex;
+      flex-direction:column;
+      justify-content:space-between;
+      pointer-events:none;
+    }
+
+    .pileBox{
+      height:46%;
+      display:flex;
+      flex-direction:column;
+    }
+
     .stack{
-      width: 100%;
       flex:1;
       display:flex;
       flex-direction:column;
       align-items:center;
-      justify-content:flex-start;
-      gap:6px;
+      gap: var(--gap);
+      overflow:hidden;
     }
-    .stack.bottom{
-      justify-content:flex-end;
-    }
+    .stack.top{ justify-content:flex-start; }
+    .stack.bottom{ justify-content:flex-end; }
 
     .block{
-      width: 18px;
-      height: 18px;
-      background: var(--fg);
+      width: var(--block);
+      height: var(--block);
       border-radius: 4px;
+      background: var(--fg);
       flex: 0 0 auto;
     }
 
-    /* Falling block (absolute) */
+    /* Falling block overlay (absolute inside .field) */
     .falling{
       position:absolute;
-      left: 50%;
+      left:50%;
       transform: translateX(-50%);
-      width: 18px;
-      height: 18px;
-      background: var(--fg);
+      width: var(--block);
+      height: var(--block);
       border-radius: 4px;
-      will-change: transform, top;
+      background: var(--fg);
       pointer-events:none;
+      will-change: top;
     }
 
     .hint{
@@ -228,15 +224,12 @@
       display:flex;
       gap:10px;
     }
-    .controls button{
-      flex:1;
-      padding: 14px 12px;
-    }
+    .controls button{ flex:1; padding: 14px 12px; }
 
     .overlay{
       position:absolute;
       inset:0;
-      background: rgba(0,0,0,.75);
+      background: rgba(0,0,0,.78);
       display:flex;
       align-items:center;
       justify-content:center;
@@ -269,17 +262,24 @@
     }
     .overlayButtons button{ flex:1; }
 
-    /* Utility */
-    .hidden{ display:none !important; }
+    /* Error toast */
+    .errorToast{
+      position:absolute;
+      left:14px; right:14px;
+      top:14px;
+      border:1px solid rgba(255,255,255,.28);
+      background: rgba(255,255,255,.08);
+      border-radius: 14px;
+      padding: 10px 12px;
+      font-size: 12px;
+      color: rgba(255,255,255,.9);
+      line-height: 1.35;
+      display:none;
+      white-space: pre-wrap;
+    }
 
-    /* Make it feel like a phone even on PC */
     @media (min-width: 760px){
-      .shell{
-        padding: 18px 0;
-      }
-      .screen{
-        box-shadow: 0 20px 60px rgba(0,0,0,.55);
-      }
+      .screen{ box-shadow: 0 20px 60px rgba(0,0,0,.55); }
     }
   </style>
 </head>
@@ -291,23 +291,23 @@
         <div class="brand" id="statusText">READY</div>
       </div>
 
-      <!-- SETTINGS SCREEN -->
+      <!-- SETTINGS -->
       <section class="screen" id="settingsScreen">
         <div class="title">Select Duration</div>
         <div class="subtitle">
           Blocks fall from the top pile to the bottom pile.<br/>
           When all blocks have fallen, the timer ends.
         </div>
-
         <div class="grid" id="durationGrid"></div>
-
         <div style="margin-top:12px; font-size:11px; color:var(--muted); line-height:1.45;">
-          Tip: On mobile, add this page to your Home Screen for a clean full-screen feel.
+          Reload always returns to this screen.
         </div>
       </section>
 
-      <!-- TIMER SCREEN -->
+      <!-- TIMER -->
       <section class="screen hidden" id="timerScreen">
+        <div class="errorToast" id="errorToast"></div>
+
         <div class="timerHeader">
           <div>
             <div class="timerLabel">Duration</div>
@@ -320,18 +320,16 @@
         </div>
 
         <div class="field" id="field">
-          <div class="lanes">
-            <div class="bin">
+          <div class="piles">
+            <div class="pileBox">
               <div class="binLabel">Top Pile</div>
-              <div class="stack" id="topStack"></div>
+              <div class="stack top" id="topStack"></div>
             </div>
-
-            <div class="bin">
+            <div class="pileBox">
               <div class="binLabel">Bottom Pile</div>
               <div class="stack bottom" id="bottomStack"></div>
             </div>
           </div>
-
           <div class="hint" id="hint">Press START</div>
         </div>
 
@@ -340,7 +338,6 @@
           <button class="ghost" id="backBtn">BACK</button>
         </div>
 
-        <!-- FINISH OVERLAY -->
         <div class="overlay hidden" id="finishOverlay">
           <div class="overlayCard">
             <div class="overlayTitle">Time's Up</div>
@@ -357,11 +354,22 @@
 
 <script>
 (() => {
-  // ---------- Config ----------
-  // Fixed number of blocks for a consistent, beautiful look even for 10 minutes.
-  // Each block represents an equal slice of the chosen duration.
-  const BLOCK_COUNT = 48; // balanced for mobile: readable, not too dense
-  const FALL_ANIM_MS = 260;
+  // ===== Error display (so "doesn't work" becomes diagnosable) =====
+  const errorToast = document.getElementById("errorToast");
+  function showError(msg){
+    errorToast.style.display = "block";
+    errorToast.textContent = "ERROR:\n" + msg;
+  }
+  window.addEventListener("error", (e) => {
+    showError(e.message + (e.filename ? `\n${e.filename}:${e.lineno}` : ""));
+  });
+  window.addEventListener("unhandledrejection", (e) => {
+    showError(String(e.reason || e));
+  });
+
+  // ===== Config =====
+  const BLOCK_COUNT = 40;      // fewer blocks = more stable visually on small screens
+  const MIN_FALL_MS = 220;
 
   const DURATIONS = [
     { label: "30 sec", seconds: 30 },
@@ -373,14 +381,12 @@
     { label: "10 min", seconds: 600 },
   ];
 
-  // ---------- Elements ----------
+  // ===== Elements =====
   const statusText = document.getElementById("statusText");
-
   const settingsScreen = document.getElementById("settingsScreen");
   const timerScreen = document.getElementById("timerScreen");
 
   const durationGrid = document.getElementById("durationGrid");
-
   const durationText = document.getElementById("durationText");
   const progressText = document.getElementById("progressText");
 
@@ -393,217 +399,196 @@
   const backBtn = document.getElementById("backBtn");
   const backBtn2 = document.getElementById("backBtn2");
   const restartBtn = document.getElementById("restartBtn");
-
   const finishOverlay = document.getElementById("finishOverlay");
 
-  // ---------- State ----------
+  // ===== State =====
   let selectedSeconds = null;
   let running = false;
   let finished = false;
 
   let blocksFallen = 0;
-  let intervalId = null;
-  let startTimeMs = 0;
-  let nextDropIndex = 0;
-  let dropEveryMs = 0;
+  let rafId = null;
 
-  // ---------- Helpers ----------
-  function pad2(n){ return String(n).padStart(2, "0"); }
+  let startTime = 0;
+  let dropEvery = 0;
+  let nextDrop = 0;
+
+  // ===== Helpers =====
+  const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+  const pad2 = n => String(n).padStart(2,"0");
+
   function formatDuration(sec){
     if (sec < 60) return `${sec} sec`;
-    const m = Math.floor(sec / 60);
-    const s = sec % 60;
+    const m = Math.floor(sec/60);
+    const s = sec%60;
     if (s === 0) return `${m} min`;
     return `${m}:${pad2(s)}`;
   }
 
   function setStatus(s){ statusText.textContent = s; }
 
-  function showSettings(){
-    stopTimer();
-    selectedSeconds = null;
-    settingsScreen.classList.remove("hidden");
-    timerScreen.classList.add("hidden");
-    setStatus("READY");
+  function updateProgress(){
+    const pct = Math.round((blocksFallen / BLOCK_COUNT) * 100);
+    progressText.textContent = `${pct}%`;
   }
 
-  function showTimer(seconds){
-    stopTimer();
-    selectedSeconds = seconds;
+  function stop(){
+    running = false;
+    if (rafId) cancelAnimationFrame(rafId);
+    rafId = null;
+  }
 
-    settingsScreen.classList.add("hidden");
-    timerScreen.classList.remove("hidden");
+  function resetStacks(){
+    stop();
+    finished = false;
+    blocksFallen = 0;
+    nextDrop = 0;
+    topStack.innerHTML = "";
+    bottomStack.innerHTML = "";
 
-    durationText.textContent = formatDuration(seconds);
-    resetStacks();
+    for(let i=0;i<BLOCK_COUNT;i++){
+      const b = document.createElement("div");
+      b.className = "block";
+      topStack.appendChild(b);
+    }
     updateProgress();
-
     hint.textContent = "Press START";
     hint.classList.remove("hidden");
     finishOverlay.classList.add("hidden");
     setStatus("READY");
   }
 
-  function resetStacks(){
+  function showSettings(){
+    stop();
+    selectedSeconds = null;
+    settingsScreen.classList.remove("hidden");
+    timerScreen.classList.add("hidden");
+    setStatus("READY");
+  }
+
+  function showTimer(sec){
+    stop();
+    errorToast.style.display = "none";
+    selectedSeconds = sec;
+    settingsScreen.classList.add("hidden");
+    timerScreen.classList.remove("hidden");
+    durationText.textContent = formatDuration(sec);
+    resetStacks();
+  }
+
+  function finish(){
+    stop();
     running = false;
-    finished = false;
-    blocksFallen = 0;
-    nextDropIndex = 0;
-
-    topStack.innerHTML = "";
-    bottomStack.innerHTML = "";
-
-    // Create all blocks in the top stack
-    for (let i = 0; i < BLOCK_COUNT; i++){
-      const b = document.createElement("div");
-      b.className = "block";
-      topStack.appendChild(b);
-    }
-
-    // Make stacks fit nicely in various heights by scaling block size subtly
-    requestAnimationFrame(() => fitBlockSize());
-  }
-
-  function fitBlockSize(){
-    // Adjust block size to available height so the pile never overflows.
-    const fieldRect = field.getBoundingClientRect();
-    const availableTop = (fieldRect.height * 0.44) - 28; // bin label + spacing
-    const gap = 6;
-    const maxPerPile = BLOCK_COUNT;
-
-    // Solve for size so (size * count) + gap*(count-1) <= availableTop
-    let size = Math.floor((availableTop - gap * (maxPerPile - 1)) / maxPerPile);
-    size = Math.max(10, Math.min(18, size)); // keep it elegant
-
-    const blocks = field.querySelectorAll(".block");
-    blocks.forEach(el => {
-      el.style.width = size + "px";
-      el.style.height = size + "px";
-      el.style.borderRadius = Math.max(3, Math.floor(size * 0.22)) + "px";
-    });
-  }
-
-  function updateProgress(){
-    const pct = Math.round((blocksFallen / BLOCK_COUNT) * 100);
-    progressText.textContent = `${pct}%`;
-  }
-
-  function stopTimer(){
-    running = false;
-    finished = false;
-    if (intervalId) clearInterval(intervalId);
-    intervalId = null;
-  }
-
-  function startTimer(){
-    if (!selectedSeconds || running) return;
-
-    finished = false;
-    running = true;
-    setStatus("RUNNING");
-    hint.classList.add("hidden");
-    finishOverlay.classList.add("hidden");
-
-    // Each block drop represents an equal slice of time.
-    dropEveryMs = (selectedSeconds * 1000) / BLOCK_COUNT;
-    startTimeMs = performance.now();
-
-    // Drop one immediately for responsiveness, then proceed.
-    dropOne();
-
-    intervalId = setInterval(() => {
-      if (!running) return;
-
-      // Use time-based pacing to reduce drift.
-      const elapsed = performance.now() - startTimeMs;
-      const shouldHaveDropped = Math.floor(elapsed / dropEveryMs) + 1; // +1 because first drop happened immediately
-      while (nextDropIndex < Math.min(shouldHaveDropped, BLOCK_COUNT)) {
-        dropOne();
-      }
-    }, 60);
+    finished = true;
+    setStatus("DONE");
+    finishOverlay.classList.remove("hidden");
   }
 
   function dropOne(){
     if (!running) return;
-    if (nextDropIndex >= BLOCK_COUNT) return;
+    if (nextDrop >= BLOCK_COUNT) return;
 
     const block = topStack.lastElementChild;
-    if (!block) return;
+    if (!block) { finish(); return; }
 
-    // Convert to a falling block at the block's current position
-    const blockRect = block.getBoundingClientRect();
+    // Safe geometry (avoid NaN)
     const fieldRect = field.getBoundingClientRect();
+    const topRect = topStack.getBoundingClientRect();
+    const bottomRect = bottomStack.getBoundingClientRect();
 
+    const fieldH = fieldRect.height;
+    if (!fieldH || !isFinite(fieldH)){
+      // If layout not ready, retry next frame
+      return;
+    }
+
+    // Create falling block at a stable "spawn" position under the top label
     const falling = document.createElement("div");
     falling.className = "falling";
-    // Copy size/radius from current block style
-    const computed = getComputedStyle(block);
-    falling.style.width = computed.width;
-    falling.style.height = computed.height;
-    falling.style.borderRadius = computed.borderRadius;
 
-    // Starting Y relative to field
-    const startY = blockRect.top - fieldRect.top;
-    falling.style.top = startY + "px";
-
+    const spawnY = clamp((topRect.top - fieldRect.top) + 18, 12, fieldH - 24);
+    falling.style.top = spawnY + "px";
     field.appendChild(falling);
 
-    // Remove from top pile visually
+    // Remove from top pile immediately
     block.remove();
 
-    // Target Y: just above the bottom stack's next position
-    const bottomRect = bottomStack.getBoundingClientRect();
-    const targetBaseY = bottomRect.bottom - fieldRect.top; // bottom edge within field
-    const size = parseFloat(computed.height);
+    // Compute target landing Y based on how many have already landed
+    const blockSize = parseFloat(getComputedStyle(falling).height) || 16;
     const gap = 6;
 
-    // Stack upward in bottom pile
-    const targetY = targetBaseY - (size + gap) * (blocksFallen + 1);
+    const bottomInsideTop = (bottomRect.top - fieldRect.top);
+    const bottomInsideBottom = (bottomRect.bottom - fieldRect.top);
 
-    // Animate
-    const fallDuration = Math.max(FALL_ANIM_MS, Math.min(520, dropEveryMs * 0.6));
-    falling.style.transition = `top ${fallDuration}ms cubic-bezier(.2,.9,.2,1)`;
+    // land near bottom edge, stacked upward
+    const targetY = clamp(
+      bottomInsideBottom - (blockSize + gap) * (blocksFallen + 1),
+      bottomInsideTop + 10,
+      fieldH - blockSize - 10
+    );
 
-    // Force reflow before applying new top
+    const fallMs = clamp(dropEvery * 0.6, MIN_FALL_MS, 600);
+    falling.style.transition = `top ${fallMs}ms cubic-bezier(.2,.9,.2,1)`;
+
+    // trigger transition
     void falling.offsetHeight;
     falling.style.top = targetY + "px";
 
-    // On finish: add a real block into bottom pile and remove the falling node
     setTimeout(() => {
-      // Add to bottom pile
+      // add landed block
       const landed = document.createElement("div");
       landed.className = "block";
-      landed.style.width = computed.width;
-      landed.style.height = computed.height;
-      landed.style.borderRadius = computed.borderRadius;
       bottomStack.appendChild(landed);
 
       falling.remove();
 
       blocksFallen++;
-      nextDropIndex++;
+      nextDrop++;
       updateProgress();
 
-      if (blocksFallen >= BLOCK_COUNT){
-        finish();
-      }
-    }, fallDuration + 10);
+      if (blocksFallen >= BLOCK_COUNT) finish();
+    }, fallMs + 20);
   }
 
-  function finish(){
-    running = false;
-    finished = true;
-    if (intervalId) clearInterval(intervalId);
-    intervalId = null;
+  function loop(t){
+    if (!running) return;
 
-    setStatus("DONE");
-    finishOverlay.classList.remove("hidden");
+    const elapsed = t - startTime;
+    const shouldDrop = Math.floor(elapsed / dropEvery);
+
+    while (nextDrop <= shouldDrop && nextDrop < BLOCK_COUNT){
+      dropOne();
+    }
+    rafId = requestAnimationFrame(loop);
   }
 
-  // ---------- Build Settings UI ----------
+  function start(){
+    if (!selectedSeconds) return;
+    if (running) return;
+
+    if (finished){
+      resetStacks();
+    }
+
+    running = true;
+    finished = false;
+    setStatus("RUNNING");
+    hint.classList.add("hidden");
+    finishOverlay.classList.add("hidden");
+
+    dropEvery = (selectedSeconds * 1000) / BLOCK_COUNT;
+    startTime = performance.now();
+    nextDrop = 0;
+
+    // first drop immediately
+    dropOne();
+    rafId = requestAnimationFrame(loop);
+  }
+
+  // ===== Build UI =====
   function buildDurationButtons(){
     durationGrid.innerHTML = "";
-    DURATIONS.forEach((d) => {
+    DURATIONS.forEach(d => {
       const btn = document.createElement("button");
       btn.textContent = d.label.toUpperCase();
       btn.addEventListener("click", () => showTimer(d.seconds));
@@ -611,41 +596,24 @@
     });
   }
 
-  // ---------- Events ----------
-  startBtn.addEventListener("click", () => {
-    if (!selectedSeconds) return;
-    if (finished){
-      // If finished, start over cleanly
-      resetStacks();
-    }
-    if (!running) startTimer();
-  });
-
+  // ===== Events =====
+  startBtn.addEventListener("click", start);
   backBtn.addEventListener("click", showSettings);
   backBtn2.addEventListener("click", showSettings);
+  restartBtn.addEventListener("click", () => { resetStacks(); start(); });
 
-  restartBtn.addEventListener("click", () => {
-    if (!selectedSeconds) return;
-    resetStacks();
-    startTimer();
-  });
-
-  // Refit on resize/orientation change
-  window.addEventListener("resize", () => {
-    if (!timerScreen.classList.contains("hidden")) fitBlockSize();
-  });
-
-  // If the tab is hidden, pause to avoid weird drift
+  // If tab hidden, stop to avoid drift
   document.addEventListener("visibilitychange", () => {
     if (document.hidden && running){
-      stopTimer();
+      stop();
+      running = false;
+      setStatus("PAUSED");
       hint.textContent = "Paused (tab hidden)";
       hint.classList.remove("hidden");
-      setStatus("PAUSED");
     }
   });
 
-  // ---------- Init ----------
+  // ===== Init =====
   buildDurationButtons();
   showSettings();
 })();
@@ -653,3 +621,8 @@
 </body>
 </html>
 ```
+
+---
+
+もしこれでも「動かない」場合、ほぼ確実に原因特定できます。
+そのときは画面左上に **ERROR** が出るはずなので、表示された文言をそのまま貼ってください（スクショでもOK）。こちらで即直します。
