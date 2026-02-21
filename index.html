@@ -14,9 +14,12 @@
       --pad:16px;
       --radius:18px;
       --w: 420px;
-      --block: 16px;
+
+      --cols: 10;
       --gap: 6px;
+      --block: 16px;
     }
+
     *{ box-sizing:border-box; }
     html,body{ height:100%; }
     body{
@@ -28,6 +31,7 @@
       overflow:hidden;
       touch-action: manipulation;
     }
+
     .app{
       height:100%;
       display:flex;
@@ -56,6 +60,7 @@
       color:var(--muted);
       text-transform:uppercase;
     }
+
     .screen{
       flex:1;
       border:1px solid var(--thin);
@@ -64,11 +69,11 @@
       position:relative;
       overflow:hidden;
     }
+
     .title{
       margin:2px 0 10px;
       font-size:16px;
       font-weight:650;
-      letter-spacing:.02em;
     }
     .subtitle{
       margin:0 0 14px;
@@ -76,11 +81,13 @@
       color:var(--muted);
       line-height:1.4;
     }
+
     .grid{
       display:grid;
       grid-template-columns: 1fr 1fr;
       gap:10px;
     }
+
     button{
       appearance:none;
       border:1px solid var(--thin);
@@ -90,7 +97,6 @@
       padding: 14px 12px;
       font-size:14px;
       font-weight:650;
-      letter-spacing:.02em;
       cursor:pointer;
       user-select:none;
       transition: transform .06s ease, border-color .15s ease, background .15s ease;
@@ -102,10 +108,14 @@
       border-color: rgba(255,255,255,.35);
     }
     button.ghost{ background: transparent; }
+    button:disabled{
+      opacity:.45;
+      cursor:not-allowed;
+    }
 
     .hidden{ display:none !important; }
 
-    /* Timer layout */
+    /* Timer header */
     .timerHeader{
       display:flex;
       justify-content:space-between;
@@ -125,6 +135,7 @@
       margin-top:2px;
     }
 
+    /* Field */
     .field{
       position:absolute;
       left:14px; right:14px;
@@ -135,15 +146,6 @@
       background: rgba(255,255,255,.03);
     }
 
-    .binLabel{
-      font-size:10px;
-      color:rgba(255,255,255,.55);
-      letter-spacing:.1em;
-      text-transform:uppercase;
-      margin-bottom:8px;
-      text-align:center;
-    }
-
     .piles{
       position:absolute;
       inset:0;
@@ -151,45 +153,60 @@
       display:flex;
       flex-direction:column;
       justify-content:space-between;
+      gap: 10px;
       pointer-events:none;
     }
 
     .pileBox{
-      height:46%;
+      height: 46%;
       display:flex;
       flex-direction:column;
+      min-height: 0;
     }
 
-    .stack{
-      flex:1;
-      display:flex;
-      flex-direction:column;
-      align-items:center;
-      gap: var(--gap);
-      overflow:hidden;
-    }
-    .stack.top{ justify-content:flex-start; }
-    .stack.bottom{ justify-content:flex-end; }
-
-    .block{
-      width: var(--block);
-      height: var(--block);
-      border-radius: 4px;
-      background: var(--fg);
+    .binLabel{
+      font-size:10px;
+      color:rgba(255,255,255,.55);
+      letter-spacing:.1em;
+      text-transform:uppercase;
+      text-align:center;
+      margin-bottom: 10px;
       flex: 0 0 auto;
     }
 
-    /* Falling block overlay (absolute inside .field) */
+    /* 10 columns layout */
+    .blockGrid{
+      flex: 1 1 auto;
+      display:grid;
+      grid-template-columns: repeat(var(--cols), 1fr);
+      gap: var(--gap);
+      align-content:start;
+      justify-items:center;
+      overflow:hidden;
+      min-height: 0;
+    }
+
+    .slot{
+      width: var(--block);
+      height: var(--block);
+      border-radius: 4px;
+      background: transparent;
+      border: 1px solid rgba(255,255,255,.08);
+    }
+    .slot.filled{
+      background: var(--fg);
+      border-color: transparent;
+    }
+
     .falling{
       position:absolute;
-      left:50%;
-      transform: translateX(-50%);
       width: var(--block);
       height: var(--block);
       border-radius: 4px;
       background: var(--fg);
+      left:0; top:0;
       pointer-events:none;
-      will-change: top;
+      will-change: transform;
     }
 
     .hint{
@@ -251,27 +268,13 @@
     }
     .overlayButtons button{ flex:1; }
 
-    /* Error toast */
-    .errorToast{
-      position:absolute;
-      left:14px; right:14px;
-      top:14px;
-      border:1px solid rgba(255,255,255,.28);
-      background: rgba(255,255,255,.08);
-      border-radius: 14px;
-      padding: 10px 12px;
-      font-size: 12px;
-      color: rgba(255,255,255,.9);
-      line-height: 1.35;
-      display:none;
-      white-space: pre-wrap;
-    }
-
+    /* Make blocks fit nicely to available height */
     @media (min-width: 760px){
       .screen{ box-shadow: 0 20px 60px rgba(0,0,0,.55); }
     }
   </style>
 </head>
+
 <body>
   <div class="app">
     <div class="shell">
@@ -295,8 +298,6 @@
 
       <!-- TIMER -->
       <section class="screen hidden" id="timerScreen">
-        <div class="errorToast" id="errorToast"></div>
-
         <div class="timerHeader">
           <div>
             <div class="timerLabel">Duration</div>
@@ -312,11 +313,11 @@
           <div class="piles">
             <div class="pileBox">
               <div class="binLabel">Top Pile</div>
-              <div class="stack top" id="topStack"></div>
+              <div class="blockGrid" id="topGrid"></div>
             </div>
             <div class="pileBox">
               <div class="binLabel">Bottom Pile</div>
-              <div class="stack bottom" id="bottomStack"></div>
+              <div class="blockGrid" id="bottomGrid"></div>
             </div>
           </div>
           <div class="hint" id="hint">Press START</div>
@@ -343,22 +344,13 @@
 
 <script>
 (() => {
-  // ===== Error display (so "doesn't work" becomes diagnosable) =====
-  const errorToast = document.getElementById("errorToast");
-  function showError(msg){
-    errorToast.style.display = "block";
-    errorToast.textContent = "ERROR:\n" + msg;
-  }
-  window.addEventListener("error", (e) => {
-    showError(e.message + (e.filename ? `\n${e.filename}:${e.lineno}` : ""));
-  });
-  window.addEventListener("unhandledrejection", (e) => {
-    showError(String(e.reason || e));
-  });
-
   // ===== Config =====
-  const BLOCK_COUNT = 40;      // fewer blocks = more stable visually on small screens
-  const MIN_FALL_MS = 220;
+  const COLS = 10;
+
+  // 10 columns fixed. Rows are chosen to look good and still animate smoothly.
+  // 6 rows => 60 blocks (good density, smooth pacing even at 10 min)
+  const ROWS = 6;
+  const TOTAL = COLS * ROWS;
 
   const DURATIONS = [
     { label: "30 sec", seconds: 30 },
@@ -374,14 +366,14 @@
   const statusText = document.getElementById("statusText");
   const settingsScreen = document.getElementById("settingsScreen");
   const timerScreen = document.getElementById("timerScreen");
-
   const durationGrid = document.getElementById("durationGrid");
+
   const durationText = document.getElementById("durationText");
   const progressText = document.getElementById("progressText");
 
   const field = document.getElementById("field");
-  const topStack = document.getElementById("topStack");
-  const bottomStack = document.getElementById("bottomStack");
+  const topGrid = document.getElementById("topGrid");
+  const bottomGrid = document.getElementById("bottomGrid");
   const hint = document.getElementById("hint");
 
   const startBtn = document.getElementById("startBtn");
@@ -395,17 +387,16 @@
   let running = false;
   let finished = false;
 
-  let blocksFallen = 0;
-  let rafId = null;
+  let dropped = 0;
+  let dropEveryMs = 0;
+  let timerId = null;
 
-  let startTime = 0;
-  let dropEvery = 0;
-  let nextDrop = 0;
+  // Slots arrays
+  let topSlots = [];
+  let bottomSlots = [];
 
   // ===== Helpers =====
-  const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
   const pad2 = n => String(n).padStart(2,"0");
-
   function formatDuration(sec){
     if (sec < 60) return `${sec} sec`;
     const m = Math.floor(sec/60);
@@ -413,34 +404,81 @@
     if (s === 0) return `${m} min`;
     return `${m}:${pad2(s)}`;
   }
-
   function setStatus(s){ statusText.textContent = s; }
-
   function updateProgress(){
-    const pct = Math.round((blocksFallen / BLOCK_COUNT) * 100);
+    const pct = Math.round((dropped / TOTAL) * 100);
     progressText.textContent = `${pct}%`;
+  }
+
+  function clearTimer(){
+    if (timerId) clearTimeout(timerId);
+    timerId = null;
   }
 
   function stop(){
     running = false;
-    if (rafId) cancelAnimationFrame(rafId);
-    rafId = null;
+    clearTimer();
+    startBtn.disabled = false;
+  }
+
+  function finish(){
+    stop();
+    finished = true;
+    setStatus("DONE");
+    finishOverlay.classList.remove("hidden");
+  }
+
+  function buildSlots(){
+    topGrid.style.setProperty("--cols", COLS);
+    bottomGrid.style.setProperty("--cols", COLS);
+
+    topGrid.innerHTML = "";
+    bottomGrid.innerHTML = "";
+    topSlots = [];
+    bottomSlots = [];
+
+    for (let i=0; i<TOTAL; i++){
+      const t = document.createElement("div");
+      t.className = "slot filled";
+      t.dataset.index = i;
+      topGrid.appendChild(t);
+      topSlots.push(t);
+
+      const b = document.createElement("div");
+      b.className = "slot";
+      b.dataset.index = i;
+      bottomGrid.appendChild(b);
+      bottomSlots.push(b);
+    }
+  }
+
+  function fitBlockSize(){
+    // compute block size so ROWS fit in each pile area comfortably
+    const fieldRect = field.getBoundingClientRect();
+    if (!fieldRect.height) return;
+
+    // each pileBox about 46% of field height; subtract label area
+    const pileHeight = fieldRect.height * 0.46;
+    const labelSpace = 22 + 10; // label + margin
+    const available = pileHeight - labelSpace;
+
+    const gap = 6;
+    let size = Math.floor((available - gap*(ROWS-1)) / ROWS);
+    size = Math.max(10, Math.min(20, size));
+
+    document.documentElement.style.setProperty("--block", size + "px");
+    document.documentElement.style.setProperty("--gap", gap + "px");
   }
 
   function resetStacks(){
     stop();
     finished = false;
-    blocksFallen = 0;
-    nextDrop = 0;
-    topStack.innerHTML = "";
-    bottomStack.innerHTML = "";
-
-    for(let i=0;i<BLOCK_COUNT;i++){
-      const b = document.createElement("div");
-      b.className = "block";
-      topStack.appendChild(b);
-    }
+    dropped = 0;
     updateProgress();
+
+    buildSlots();
+    fitBlockSize();
+
     hint.textContent = "Press START";
     hint.classList.remove("hidden");
     finishOverlay.classList.add("hidden");
@@ -457,98 +495,93 @@
 
   function showTimer(sec){
     stop();
-    errorToast.style.display = "none";
     selectedSeconds = sec;
+
     settingsScreen.classList.add("hidden");
     timerScreen.classList.remove("hidden");
+
     durationText.textContent = formatDuration(sec);
     resetStacks();
   }
 
-  function finish(){
-    stop();
-    running = false;
-    finished = true;
-    setStatus("DONE");
-    finishOverlay.classList.remove("hidden");
+  function topNextIndex(){
+    // take from the end, skipping already emptied slots
+    for (let i = TOTAL - 1; i >= 0; i--){
+      if (topSlots[i].classList.contains("filled")) return i;
+    }
+    return -1;
   }
 
-  function dropOne(){
-    if (!running) return;
-    if (nextDrop >= BLOCK_COUNT) return;
+  function bottomTargetIndex(){
+    // fill from the end backwards so it visually "accumulates"
+    return (TOTAL - 1) - dropped;
+  }
 
-    const block = topStack.lastElementChild;
-    if (!block) { finish(); return; }
-
-    // Safe geometry (avoid NaN)
+  function animateDrop(fromSlot, toSlot){
     const fieldRect = field.getBoundingClientRect();
-    const topRect = topStack.getBoundingClientRect();
-    const bottomRect = bottomStack.getBoundingClientRect();
+    const fromRect = fromSlot.getBoundingClientRect();
+    const toRect = toSlot.getBoundingClientRect();
 
-    const fieldH = fieldRect.height;
-    if (!fieldH || !isFinite(fieldH)){
-      // If layout not ready, retry next frame
+    // create absolute "falling" block
+    const falling = document.createElement("div");
+    falling.className = "falling";
+    field.appendChild(falling);
+
+    // initial position
+    const x0 = fromRect.left - fieldRect.left;
+    const y0 = fromRect.top  - fieldRect.top;
+    falling.style.transform = `translate(${x0}px, ${y0}px)`;
+
+    // remove from top immediately
+    fromSlot.classList.remove("filled");
+
+    // target position
+    const x1 = toRect.left - fieldRect.left;
+    const y1 = toRect.top  - fieldRect.top;
+
+    // duration: a bit shorter than interval, but never too tiny
+    const dur = Math.max(220, Math.min(650, dropEveryMs * 0.65));
+
+    // animate via transform (GPU-friendly)
+    requestAnimationFrame(() => {
+      falling.style.transition = `transform ${dur}ms cubic-bezier(.2,.9,.2,1)`;
+      falling.style.transform = `translate(${x1}px, ${y1}px)`;
+    });
+
+    // land
+    setTimeout(() => {
+      falling.remove();
+      toSlot.classList.add("filled");
+    }, dur + 10);
+
+    return dur;
+  }
+
+  function step(){
+    if (!running) return;
+
+    const fromIdx = topNextIndex();
+    if (fromIdx < 0){
+      finish();
+      return;
+    }
+    const toIdx = bottomTargetIndex();
+    const fromSlot = topSlots[fromIdx];
+    const toSlot = bottomSlots[toIdx];
+
+    // schedule
+    animateDrop(fromSlot, toSlot);
+
+    dropped++;
+    updateProgress();
+
+    if (dropped >= TOTAL){
+      // let the last animation finish a bit, then show overlay
+      timerId = setTimeout(() => finish(), 260);
       return;
     }
 
-    // Create falling block at a stable "spawn" position under the top label
-    const falling = document.createElement("div");
-    falling.className = "falling";
-
-    const spawnY = clamp((topRect.top - fieldRect.top) + 18, 12, fieldH - 24);
-    falling.style.top = spawnY + "px";
-    field.appendChild(falling);
-
-    // Remove from top pile immediately
-    block.remove();
-
-    // Compute target landing Y based on how many have already landed
-    const blockSize = parseFloat(getComputedStyle(falling).height) || 16;
-    const gap = 6;
-
-    const bottomInsideTop = (bottomRect.top - fieldRect.top);
-    const bottomInsideBottom = (bottomRect.bottom - fieldRect.top);
-
-    // land near bottom edge, stacked upward
-    const targetY = clamp(
-      bottomInsideBottom - (blockSize + gap) * (blocksFallen + 1),
-      bottomInsideTop + 10,
-      fieldH - blockSize - 10
-    );
-
-    const fallMs = clamp(dropEvery * 0.6, MIN_FALL_MS, 600);
-    falling.style.transition = `top ${fallMs}ms cubic-bezier(.2,.9,.2,1)`;
-
-    // trigger transition
-    void falling.offsetHeight;
-    falling.style.top = targetY + "px";
-
-    setTimeout(() => {
-      // add landed block
-      const landed = document.createElement("div");
-      landed.className = "block";
-      bottomStack.appendChild(landed);
-
-      falling.remove();
-
-      blocksFallen++;
-      nextDrop++;
-      updateProgress();
-
-      if (blocksFallen >= BLOCK_COUNT) finish();
-    }, fallMs + 20);
-  }
-
-  function loop(t){
-    if (!running) return;
-
-    const elapsed = t - startTime;
-    const shouldDrop = Math.floor(elapsed / dropEvery);
-
-    while (nextDrop <= shouldDrop && nextDrop < BLOCK_COUNT){
-      dropOne();
-    }
-    rafId = requestAnimationFrame(loop);
+    timerId = setTimeout(step, dropEveryMs);
   }
 
   function start(){
@@ -564,17 +597,15 @@
     setStatus("RUNNING");
     hint.classList.add("hidden");
     finishOverlay.classList.add("hidden");
+    startBtn.disabled = true;
 
-    dropEvery = (selectedSeconds * 1000) / BLOCK_COUNT;
-    startTime = performance.now();
-    nextDrop = 0;
+    dropEveryMs = (selectedSeconds * 1000) / TOTAL;
 
     // first drop immediately
-    dropOne();
-    rafId = requestAnimationFrame(loop);
+    step();
   }
 
-  // ===== Build UI =====
+  // ===== Build settings UI =====
   function buildDurationButtons(){
     durationGrid.innerHTML = "";
     DURATIONS.forEach(d => {
@@ -591,11 +622,15 @@
   backBtn2.addEventListener("click", showSettings);
   restartBtn.addEventListener("click", () => { resetStacks(); start(); });
 
-  // If tab hidden, stop to avoid drift
+  window.addEventListener("resize", () => {
+    if (!timerScreen.classList.contains("hidden")){
+      fitBlockSize();
+    }
+  });
+
   document.addEventListener("visibilitychange", () => {
     if (document.hidden && running){
       stop();
-      running = false;
       setStatus("PAUSED");
       hint.textContent = "Paused (tab hidden)";
       hint.classList.remove("hidden");
