@@ -1,0 +1,670 @@
+```html
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+  <title>Pixel Hourglass Timer</title>
+  <style>
+    :root{
+      --bg:#000;
+      --fg:#fff;
+      --muted:rgba(255,255,255,.65);
+      --soft:rgba(255,255,255,.18);
+    }
+    html,body{
+      margin:0;
+      height:100%;
+      background:var(--bg);
+      color:var(--fg);
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, "Hiragino Kaku Gothic ProN", "Noto Sans JP", "Yu Gothic", sans-serif;
+      overflow:hidden;
+      -webkit-tap-highlight-color: transparent;
+      touch-action: manipulation;
+    }
+
+    /* Always show as smartphone-sized even on PC */
+    .phone {
+      width: min(420px, 100vw);
+      height: 100vh;
+      margin: 0 auto;
+      display:flex;
+      flex-direction:column;
+      align-items:center;
+      justify-content:center;
+      position:relative;
+      padding: 18px 14px calc(18px + env(safe-area-inset-bottom));
+      box-sizing:border-box;
+    }
+
+    .screen{
+      width:100%;
+      height:100%;
+      display:none;
+      flex-direction:column;
+      align-items:center;
+      justify-content:center;
+      gap:16px;
+    }
+    .screen.active{ display:flex; }
+
+    .title{
+      font-size:14px;
+      letter-spacing:.08em;
+      color:var(--muted);
+      margin-top: env(safe-area-inset-top);
+      user-select:none;
+    }
+
+    .grid{
+      width:100%;
+      display:grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap:10px;
+      padding: 10px 6px;
+      box-sizing:border-box;
+    }
+
+    .timeBtn{
+      border:1px solid var(--soft);
+      background:transparent;
+      color:var(--fg);
+      padding:14px 10px;
+      border-radius:14px;
+      font-size:14px;
+      letter-spacing:.02em;
+      cursor:pointer;
+      user-select:none;
+    }
+    .timeBtn:active{
+      transform: scale(.98);
+      border-color: rgba(255,255,255,.35);
+    }
+
+    /* Timer screen */
+    .canvasWrap{
+      width:100%;
+      flex: 1 1 auto;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      position:relative;
+    }
+    canvas{
+      width: 100%;
+      height: 100%;
+      display:block;
+    }
+
+    .glassWrap{
+      width:100%;
+      height:100%;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      transform: rotate(0deg);
+      transition: transform 520ms cubic-bezier(.2,.8,.2,1);
+      will-change: transform;
+    }
+    .glassWrap.flipped{
+      transform: rotate(180deg);
+    }
+
+    .controls{
+      position:absolute;
+      left:0; right:0;
+      bottom: 18px;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      gap:14px;
+      padding: 0 14px;
+      box-sizing:border-box;
+      pointer-events:auto;
+    }
+    .ctrlBtn{
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      gap:8px;
+      border:1px solid var(--soft);
+      background:rgba(255,255,255,.03);
+      color:var(--fg);
+      border-radius:999px;
+      padding:10px 14px;
+      font-size:13px;
+      cursor:pointer;
+      user-select:none;
+      backdrop-filter: blur(6px);
+    }
+    .ctrlBtn:active{ transform: scale(.98); }
+
+    .ctrlIcon{
+      width:16px; height:16px;
+      display:inline-block;
+      position:relative;
+    }
+    /* Play icon */
+    .iconPlay::before{
+      content:"";
+      position:absolute;
+      left:5px; top:3px;
+      width:0; height:0;
+      border-top:5px solid transparent;
+      border-bottom:5px solid transparent;
+      border-left:8px solid var(--fg);
+    }
+    /* Back/select icon (grid) */
+    .iconGrid{
+      display:grid;
+      grid-template-columns: repeat(2, 6px);
+      grid-auto-rows: 6px;
+      gap:2px;
+      width:16px; height:16px;
+    }
+    .iconGrid span{
+      width:6px; height:6px;
+      border:1px solid var(--fg);
+      box-sizing:border-box;
+      opacity:.9;
+    }
+
+    .hidden{ display:none !important; }
+
+    /* Optional tiny hint */
+    .hint{
+      font-size:12px;
+      color:var(--muted);
+      user-select:none;
+      text-align:center;
+      line-height:1.4;
+      padding:0 10px;
+    }
+  </style>
+</head>
+<body>
+  <div class="phone">
+
+    <!-- Screen: Select duration -->
+    <section id="screenSelect" class="screen active" aria-label="タイマー選択">
+      <div class="title">PIXEL HOURGLASS TIMER</div>
+      <div class="grid" role="list">
+        <button class="timeBtn" data-sec="60">60秒</button>
+        <button class="timeBtn" data-sec="120">120秒</button>
+        <button class="timeBtn" data-sec="150">150秒</button>
+        <button class="timeBtn" data-sec="180">180秒</button>
+        <button class="timeBtn" data-sec="300">5分</button>
+        <button class="timeBtn" data-sec="600">10分</button>
+      </div>
+      <div class="hint">時間をタップすると砂時計へ</div>
+    </section>
+
+    <!-- Screen: Hourglass -->
+    <section id="screenTimer" class="screen" aria-label="砂時計">
+      <div class="canvasWrap">
+        <div id="glassWrap" class="glassWrap" aria-hidden="true">
+          <canvas id="c"></canvas>
+        </div>
+
+        <!-- Controls (appear when NOT running, hide while running) -->
+        <div id="controls" class="controls">
+          <button id="btnStart" class="ctrlBtn" type="button" aria-label="スタート">
+            <span class="ctrlIcon iconPlay" aria-hidden="true"></span>
+            <span>スタート</span>
+          </button>
+          <button id="btnSelect" class="ctrlBtn" type="button" aria-label="タイマー選択">
+            <span class="ctrlIcon iconGrid" aria-hidden="true">
+              <span></span><span></span><span></span><span></span>
+            </span>
+            <span>タイマー選択</span>
+          </button>
+        </div>
+      </div>
+    </section>
+
+  </div>
+
+  <script>
+  (() => {
+    // ---------- DOM ----------
+    const screenSelect = document.getElementById('screenSelect');
+    const screenTimer  = document.getElementById('screenTimer');
+    const glassWrap    = document.getElementById('glassWrap');
+    const controls     = document.getElementById('controls');
+    const btnStart     = document.getElementById('btnStart');
+    const btnSelect    = document.getElementById('btnSelect');
+    const canvas       = document.getElementById('c');
+    const ctx          = canvas.getContext('2d', { alpha: false });
+
+    // ---------- State ----------
+    const DURATIONS = [60,120,150,180,300,600];
+    let selectedSec = 150;
+
+    let running = false;
+    let flipping = false;
+    let flipped = false;            // visual orientation (CSS)
+    let startTs = 0;
+    let endTs = 0;
+
+    // Sand particles
+    const particles = [];
+    let P_COUNT = 700;              // will adapt on resize
+    let px = 2;                     // particle pixel size (will adapt)
+    let gravity = 110;              // px/s^2
+    let fallSpeedCap = 240;         // px/s
+
+    // Hourglass geometry in canvas coordinates
+    let W=0,H=0, cx=0, cy=0;
+    let pad=0, topY=0, botY=0, midY=0;
+    let leftX=0, rightX=0;
+    let neckW=0, neckH=0;
+
+    // ---------- Helpers ----------
+    const clamp = (v,a,b)=>Math.max(a,Math.min(b,v));
+    const now = () => performance.now();
+
+    function showScreen(which){
+      if(which === 'select'){
+        screenSelect.classList.add('active');
+        screenTimer.classList.remove('active');
+      }else{
+        screenSelect.classList.remove('active');
+        screenTimer.classList.add('active');
+      }
+    }
+
+    function setControlsVisible(v){
+      controls.classList.toggle('hidden', !v);
+    }
+
+    function resize(){
+      // Canvas should fill available space inside timer screen
+      const wrap = document.querySelector('.canvasWrap');
+      const rect = wrap.getBoundingClientRect();
+
+      // Use devicePixelRatio for crisp lines
+      const dpr = Math.max(1, Math.min(3, window.devicePixelRatio || 1));
+      canvas.width  = Math.floor(rect.width  * dpr);
+      canvas.height = Math.floor(rect.height * dpr);
+      canvas.style.width  = rect.width + 'px';
+      canvas.style.height = rect.height + 'px';
+      ctx.setTransform(dpr,0,0,dpr,0,0);
+
+      W = rect.width;
+      H = rect.height;
+
+      cx = W/2;
+      cy = H/2;
+
+      pad = Math.min(W,H) * 0.08;
+      topY = pad;
+      botY = H - pad;
+      midY = H/2;
+
+      leftX  = pad;
+      rightX = W - pad;
+
+      neckW = Math.min(W,H) * 0.07;    // narrow waist width
+      neckH = Math.min(W,H) * 0.10;    // waist vertical region
+
+      // Particles adapt to size
+      px = clamp(Math.round(Math.min(W,H) / 220), 2, 4);
+      P_COUNT = Math.floor((Math.min(W,H) * 7)); // scale-ish
+      P_COUNT = clamp(P_COUNT, 520, 1200);
+
+      // Reset to "sand at bottom" when entering timer screen OR on resize if not running
+      if(!running && screenTimer.classList.contains('active')){
+        makeSandBottom();
+      }
+    }
+
+    // Hourglass boundary: left/right x at given y
+    // We create a symmetric hourglass using two straight lines meeting at neck.
+    function xBoundsAtY(y){
+      // normalized t: 0 top -> 1 bottom
+      const t = (y - topY) / (botY - topY);
+      const maxHalf = (rightX - leftX) / 2;
+      const minHalf = neckW / 2;
+
+      // Piecewise linear: top half narrows to neck, bottom half widens
+      let half;
+      if (y <= midY){
+        const tt = (y - topY) / (midY - topY);
+        half = maxHalf - (maxHalf - minHalf) * tt;
+      } else {
+        const tt = (y - midY) / (botY - midY);
+        half = minHalf + (maxHalf - minHalf) * tt;
+      }
+      return { lx: cx - half, rx: cx + half };
+    }
+
+    function inGlass(x,y){
+      if(y < topY || y > botY) return false;
+      const b = xBoundsAtY(y);
+      return x >= b.lx && x <= b.rx;
+    }
+
+    function inNeck(x,y){
+      const neckTop = midY - neckH/2;
+      const neckBot = midY + neckH/2;
+      return (y >= neckTop && y <= neckBot && Math.abs(x - cx) <= neckW/2);
+    }
+
+    function drawHourglassOutline(){
+      ctx.save();
+      ctx.clearRect(0,0,W,H);
+
+      // Background black
+      ctx.fillStyle = "#000";
+      ctx.fillRect(0,0,W,H);
+
+      // Outline white
+      ctx.strokeStyle = "#fff";
+      ctx.lineWidth = Math.max(2, Math.min(3, Math.min(W,H)/220));
+      ctx.lineCap = "round";
+      ctx.lineJoin = "round";
+
+      // Outer frame (simple rounded rectangle-ish)
+      const framePad = pad * 0.4;
+      const r = 18;
+      const fx = framePad, fy = framePad;
+      const fw = W - framePad*2, fh = H - framePad*2;
+      roundRectStroke(fx, fy, fw, fh, Math.min(r, fw*0.07, fh*0.07));
+
+      // Hourglass shape
+      ctx.beginPath();
+      // left side top -> neck
+      ctx.moveTo(xBoundsAtY(topY).lx, topY);
+      ctx.lineTo(xBoundsAtY(midY).lx, midY);
+      // left side neck -> bottom
+      ctx.lineTo(xBoundsAtY(botY).lx, botY);
+
+      // bottom curve to right
+      ctx.lineTo(xBoundsAtY(botY).rx, botY);
+
+      // right side bottom -> neck -> top
+      ctx.lineTo(xBoundsAtY(midY).rx, midY);
+      ctx.lineTo(xBoundsAtY(topY).rx, topY);
+
+      // close top line
+      ctx.closePath();
+      ctx.stroke();
+
+      // neck emphasis
+      ctx.beginPath();
+      const neckTop = midY - neckH/2;
+      const neckBot = midY + neckH/2;
+      ctx.moveTo(cx - neckW/2, neckTop);
+      ctx.lineTo(cx + neckW/2, neckTop);
+      ctx.moveTo(cx - neckW/2, neckBot);
+      ctx.lineTo(cx + neckW/2, neckBot);
+      ctx.stroke();
+
+      ctx.restore();
+    }
+
+    function roundRectStroke(x,y,w,h,r){
+      ctx.beginPath();
+      ctx.moveTo(x+r,y);
+      ctx.arcTo(x+w,y,  x+w,y+h, r);
+      ctx.arcTo(x+w,y+h,x,  y+h, r);
+      ctx.arcTo(x,  y+h,x,  y,   r);
+      ctx.arcTo(x,  y,  x+w,y,   r);
+      ctx.closePath();
+      ctx.stroke();
+    }
+
+    function drawSand(){
+      ctx.save();
+      ctx.fillStyle = "#fff";
+      // pixels (small squares)
+      for(const p of particles){
+        ctx.fillRect(p.x, p.y, px, px);
+      }
+      ctx.restore();
+    }
+
+    function makeSandBottom(){
+      particles.length = 0;
+      // Fill lower chamber with packed pixels
+      // We'll stack from bottom up within bounds
+      const step = px + 1;
+      const yStart = botY - px - 2;
+      const yEnd   = midY + neckH/2 + 6;
+
+      for(let y = yStart; y >= yEnd && particles.length < P_COUNT; y -= step){
+        const b = xBoundsAtY(y);
+        // keep slightly inside outline
+        const lx = b.lx + 6;
+        const rx = b.rx - 6;
+
+        for(let x = lx; x <= rx && particles.length < P_COUNT; x += step){
+          // add some randomness to avoid perfect grid
+          const jx = x + (Math.random()*1.2 - 0.6);
+          const jy = y + (Math.random()*1.2 - 0.6);
+          particles.push({ x: jx, y: jy, vx: 0, vy: 0, settled: true });
+        }
+      }
+    }
+
+    function rotateParticles180(){
+      // rotation around center of hourglass canvas area
+      for(const p of particles){
+        const dx = (p.x + px/2) - cx;
+        const dy = (p.y + px/2) - cy;
+        const nx = cx - dx - px/2;
+        const ny = cy - dy - px/2;
+        p.x = nx;
+        p.y = ny;
+        // velocities invert
+        p.vx *= -1;
+        p.vy *= -1;
+      }
+    }
+
+    function startWithFlip(){
+      if(flipping || running) return;
+
+      flipping = true;
+
+      // visual flip
+      flipped = !flipped;
+      glassWrap.classList.toggle('flipped', flipped);
+
+      // Once flip transition ends, begin run
+      // Use once:true, but safe if called rapidly
+      const onDone = () => {
+        glassWrap.removeEventListener('transitionend', onDone);
+        // Physically rotate particles to match the visual flip,
+        // so sand that was bottom becomes top ready to fall.
+        rotateParticles180();
+        beginRun();
+        flipping = false;
+      };
+      glassWrap.addEventListener('transitionend', onDone, { once: true });
+
+      // Fallback if transitionend doesn't fire
+      setTimeout(() => {
+        if(flipping){
+          try { glassWrap.removeEventListener('transitionend', onDone); } catch(e){}
+          rotateParticles180();
+          beginRun();
+          flipping = false;
+        }
+      }, 700);
+    }
+
+    function beginRun(){
+      running = true;
+      setControlsVisible(false);
+
+      const t = now();
+      startTs = t;
+      endTs = t + selectedSec * 1000;
+
+      // Unsettle particles in upper chamber so they can fall
+      for(const p of particles){
+        p.settled = false;
+        // tiny jitter so it feels alive
+        p.vx = (Math.random()-0.5) * 10;
+        p.vy = (Math.random()) * 5;
+      }
+    }
+
+    function stopRun(){
+      running = false;
+      // Let everything settle at bottom quickly (soft snap)
+      for(const p of particles){
+        p.vx = 0; p.vy = 0;
+        p.settled = true;
+      }
+      setControlsVisible(true);
+    }
+
+    function update(dt){
+      // dt in seconds
+      if(!running) return;
+
+      // Countdown end
+      const t = now();
+      if(t >= endTs){
+        // ensure sand is bottom-ish by letting a few frames settle
+        stopRun();
+        return;
+      }
+
+      // Simple particle “fall” simulation inside hourglass
+      const neckTop = midY - neckH/2;
+      const neckBot = midY + neckH/2;
+
+      for(const p of particles){
+        if(p.settled) continue;
+
+        // Gravity
+        p.vy = clamp(p.vy + gravity * dt, -fallSpeedCap, fallSpeedCap);
+
+        // Mild horizontal drift, reduced in neck
+        const drift = inNeck(p.x, p.y) ? 0.12 : 0.5;
+        p.vx += (Math.random() - 0.5) * drift;
+
+        // Cap vx
+        p.vx = clamp(p.vx, -60, 60);
+
+        // Integrate
+        p.x += p.vx * dt;
+        p.y += p.vy * dt;
+
+        // Boundaries: keep inside glass
+        if(p.y < topY + 3){
+          p.y = topY + 3; p.vy *= -0.2;
+        }
+
+        // If in upper funnel, steer toward neck to create “stream”
+        if(p.y < neckTop){
+          const steer = (cx - p.x) * 0.02;
+          p.vx += steer;
+        }
+
+        // Constrain by side walls at current y
+        const b = xBoundsAtY(p.y);
+        const margin = 4;
+        const minX = b.lx + margin;
+        const maxX = b.rx - margin;
+
+        if(p.x < minX){
+          p.x = minX; p.vx *= -0.2;
+        }else if(p.x > maxX){
+          p.x = maxX; p.vx *= -0.2;
+        }
+
+        // Neck pinch: force x inside neck
+        if(p.y >= neckTop && p.y <= neckBot){
+          p.x = clamp(p.x, cx - neckW/2 + 2, cx + neckW/2 - 2);
+          // speed up slightly through neck
+          p.vy = Math.max(p.vy, 70);
+        }
+
+        // Bottom settle
+        if(p.y > botY - px - 4){
+          p.y = botY - px - 4;
+          p.vx = 0; p.vy = 0;
+          p.settled = true;
+        }
+      }
+
+      // If most particles settled, end early and show icons
+      let settledCount = 0;
+      for(const p of particles) if(p.settled) settledCount++;
+      if(settledCount / particles.length > 0.985){
+        stopRun();
+      }
+    }
+
+    function render(){
+      drawHourglassOutline();
+      drawSand();
+    }
+
+    // Main loop
+    let last = now();
+    function tick(){
+      const t = now();
+      const dt = clamp((t - last) / 1000, 0, 0.033);
+      last = t;
+      update(dt);
+      render();
+      requestAnimationFrame(tick);
+    }
+
+    // ---------- UI wiring ----------
+    document.querySelectorAll('.timeBtn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const sec = Number(btn.dataset.sec);
+        if(!DURATIONS.includes(sec)) return;
+        selectedSec = sec;
+
+        // move to hourglass screen
+        showScreen('timer');
+
+        // ensure hourglass starts with sand at bottom
+        running = false;
+        flipping = false;
+        setControlsVisible(true);
+        makeSandBottom();
+        render();
+      }, { passive:true });
+    });
+
+    btnStart.addEventListener('click', () => {
+      // Start icon click/tap -> flip clockwise and start; icons disappear while running
+      startWithFlip();
+    }, { passive:true });
+
+    btnSelect.addEventListener('click', () => {
+      // Timer select -> back to selection screen
+      running = false;
+      flipping = false;
+      setControlsVisible(true);
+      showScreen('select');
+    }, { passive:true });
+
+    // Reload -> naturally returns to selection (default screen is select)
+
+    // Prevent accidental scroll on mobile
+    document.addEventListener('touchmove', (e) => {
+      e.preventDefault();
+    }, { passive:false });
+
+    // Resize handling
+    window.addEventListener('resize', resize);
+
+    // Init
+    resize();
+    makeSandBottom();
+    render();
+    tick();
+  })();
+  </script>
+</body>
+</html>
+```
