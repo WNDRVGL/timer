@@ -16,8 +16,8 @@
       --w: 420px;
 
       --cols: 10;
-      --gap: 6px;
-      --block: 16px;
+      --gap: 4px;
+      --block: 10px;
     }
 
     *{ box-sizing:border-box; }
@@ -108,10 +108,7 @@
       border-color: rgba(255,255,255,.35);
     }
     button.ghost{ background: transparent; }
-    button:disabled{
-      opacity:.45;
-      cursor:not-allowed;
-    }
+    button:disabled{ opacity:.45; cursor:not-allowed; }
 
     .hidden{ display:none !important; }
 
@@ -189,7 +186,7 @@
     .slot{
       width: var(--block);
       height: var(--block);
-      border-radius: 4px;
+      border-radius: 3px;
       background: transparent;
       border: 1px solid rgba(255,255,255,.08);
     }
@@ -202,7 +199,7 @@
       position:absolute;
       width: var(--block);
       height: var(--block);
-      border-radius: 4px;
+      border-radius: 3px;
       background: var(--fg);
       left:0; top:0;
       pointer-events:none;
@@ -268,7 +265,6 @@
     }
     .overlayButtons button{ flex:1; }
 
-    /* Make blocks fit nicely to available height */
     @media (min-width: 760px){
       .screen{ box-shadow: 0 20px 60px rgba(0,0,0,.55); }
     }
@@ -347,9 +343,8 @@
   // ===== Config =====
   const COLS = 10;
 
-  // 10 columns fixed. Rows are chosen to look good and still animate smoothly.
-  // 6 rows => 60 blocks (good density, smooth pacing even at 10 min)
-  const ROWS = 6;
+  // 4x blocks: previously 10x6=60 -> now 240
+  const ROWS = 24;
   const TOTAL = COLS * ROWS;
 
   const DURATIONS = [
@@ -389,9 +384,13 @@
 
   let dropped = 0;
   let dropEveryMs = 0;
-  let timerId = null;
 
-  // Slots arrays
+  let startTime = 0;
+  let endTime = 0;
+
+  let stepTimerId = null;
+  let reconcileId = null;
+
   let topSlots = [];
   let bottomSlots = [];
 
@@ -409,15 +408,16 @@
     const pct = Math.round((dropped / TOTAL) * 100);
     progressText.textContent = `${pct}%`;
   }
-
-  function clearTimer(){
-    if (timerId) clearTimeout(timerId);
-    timerId = null;
+  function clearTimers(){
+    if (stepTimerId) clearTimeout(stepTimerId);
+    stepTimerId = null;
+    if (reconcileId) clearInterval(reconcileId);
+    reconcileId = null;
   }
 
   function stop(){
     running = false;
-    clearTimer();
+    clearTimers();
     startBtn.disabled = false;
   }
 
@@ -440,31 +440,32 @@
     for (let i=0; i<TOTAL; i++){
       const t = document.createElement("div");
       t.className = "slot filled";
-      t.dataset.index = i;
       topGrid.appendChild(t);
       topSlots.push(t);
 
       const b = document.createElement("div");
       b.className = "slot";
-      b.dataset.index = i;
       bottomGrid.appendChild(b);
       bottomSlots.push(b);
     }
   }
 
   function fitBlockSize(){
-    // compute block size so ROWS fit in each pile area comfortably
+    // Make ROWS fit in each pile area, auto-sizing block and gap.
     const fieldRect = field.getBoundingClientRect();
     if (!fieldRect.height) return;
 
-    // each pileBox about 46% of field height; subtract label area
     const pileHeight = fieldRect.height * 0.46;
-    const labelSpace = 22 + 10; // label + margin
-    const available = pileHeight - labelSpace;
+    const labelSpace = 22 + 10;
+    const available = Math.max(40, pileHeight - labelSpace);
 
-    const gap = 6;
+    // choose a small gap when rows are many
+    let gap = 3;
     let size = Math.floor((available - gap*(ROWS-1)) / ROWS);
-    size = Math.max(10, Math.min(20, size));
+
+    // keep it readable
+    size = Math.max(6, Math.min(14, size));
+    gap  = Math.max(2, Math.min(4, gap));
 
     document.documentElement.style.setProperty("--block", size + "px");
     document.documentElement.style.setProperty("--gap", gap + "px");
@@ -505,7 +506,6 @@
   }
 
   function topNextIndex(){
-    // take from the end, skipping already emptied slots
     for (let i = TOTAL - 1; i >= 0; i--){
       if (topSlots[i].classList.contains("filled")) return i;
     }
@@ -513,75 +513,97 @@
   }
 
   function bottomTargetIndex(){
-    // fill from the end backwards so it visually "accumulates"
     return (TOTAL - 1) - dropped;
   }
 
-  function animateDrop(fromSlot, toSlot){
+  function animateDrop(fromSlot, toSlot, quick=false){
+    // When in background, animations may not run; "quick" fills instantly.
+    if (quick){
+      fromSlot.classList.remove("filled");
+      toSlot.classList.add("filled");
+      return;
+    }
+
     const fieldRect = field.getBoundingClientRect();
     const fromRect = fromSlot.getBoundingClientRect();
     const toRect = toSlot.getBoundingClientRect();
 
-    // create absolute "falling" block
     const falling = document.createElement("div");
     falling.className = "falling";
     field.appendChild(falling);
 
-    // initial position
     const x0 = fromRect.left - fieldRect.left;
     const y0 = fromRect.top  - fieldRect.top;
     falling.style.transform = `translate(${x0}px, ${y0}px)`;
 
-    // remove from top immediately
     fromSlot.classList.remove("filled");
 
-    // target position
     const x1 = toRect.left - fieldRect.left;
     const y1 = toRect.top  - fieldRect.top;
 
-    // duration: a bit shorter than interval, but never too tiny
-    const dur = Math.max(220, Math.min(650, dropEveryMs * 0.65));
+    const dur = Math.max(180, Math.min(520, dropEveryMs * 0.65));
 
-    // animate via transform (GPU-friendly)
     requestAnimationFrame(() => {
       falling.style.transition = `transform ${dur}ms cubic-bezier(.2,.9,.2,1)`;
       falling.style.transform = `translate(${x1}px, ${y1}px)`;
     });
 
-    // land
     setTimeout(() => {
       falling.remove();
       toSlot.classList.add("filled");
     }, dur + 10);
-
-    return dur;
   }
 
-  function step(){
+  function doOneDrop(quick=false){
     if (!running) return;
 
     const fromIdx = topNextIndex();
-    if (fromIdx < 0){
-      finish();
-      return;
-    }
+    if (fromIdx < 0){ finish(); return; }
     const toIdx = bottomTargetIndex();
-    const fromSlot = topSlots[fromIdx];
-    const toSlot = bottomSlots[toIdx];
 
-    // schedule
-    animateDrop(fromSlot, toSlot);
+    animateDrop(topSlots[fromIdx], bottomSlots[toIdx], quick);
 
     dropped++;
     updateProgress();
 
     if (dropped >= TOTAL){
-      // let the last animation finish a bit, then show overlay
-      timerId = setTimeout(() => finish(), 260);
-      return;
+      // allow last animation a moment, then finish
+      stepTimerId = setTimeout(() => finish(), 260);
     }
+  }
 
-    timerId = setTimeout(step, dropEveryMs);
+  function scheduleNext(){
+    if (!running) return;
+    if (dropped >= TOTAL) return;
+
+    // setTimeout will be throttled in background, but reconcile() will catch up.
+    stepTimerId = setTimeout(() => {
+      doOneDrop(false);
+      scheduleNext();
+    }, dropEveryMs);
+  }
+
+  function reconcile(forceQuick=false){
+    if (!running) return;
+
+    const now = performance.now();
+    // How many drops should have happened by now (time-accurate)
+    const shouldDropped = Math.min(TOTAL, Math.floor((now - startTime) / dropEveryMs) + 1);
+    const behind = shouldDropped - dropped;
+
+    if (behind <= 0) return;
+
+    // If tab is hidden, or we’re far behind, fill quickly to catch up.
+    const isHidden = document.hidden;
+    const quick = forceQuick || isHidden || behind > 6;
+
+    // Catch up, but avoid locking the UI in one chunk.
+    // Do at most 20 per reconciliation tick.
+    const batch = Math.min(behind, 20);
+    for (let i=0; i<batch; i++){
+      doOneDrop(quick);
+      if (dropped >= TOTAL) break;
+    }
   }
 
   function start(){
@@ -600,9 +622,17 @@
     startBtn.disabled = true;
 
     dropEveryMs = (selectedSeconds * 1000) / TOTAL;
+    startTime = performance.now();
+    endTime = startTime + selectedSeconds * 1000;
 
-    // first drop immediately
-    step();
+    // First drop immediately for responsiveness
+    doOneDrop(false);
+
+    // Schedule normal stepping
+    scheduleNext();
+
+    // Reconcile loop: ensures time keeps advancing even when timers are throttled
+    reconcileId = setInterval(() => reconcile(false), 250);
   }
 
   // ===== Build settings UI =====
@@ -625,15 +655,18 @@
   window.addEventListener("resize", () => {
     if (!timerScreen.classList.contains("hidden")){
       fitBlockSize();
+      // After resize, make sure visuals match the time state
+      reconcile(true);
     }
   });
 
+  // Key improvement: DO NOT stop on hidden.
+  // Instead, when user returns, catch up instantly so "time didn't pause".
   document.addEventListener("visibilitychange", () => {
-    if (document.hidden && running){
-      stop();
-      setStatus("PAUSED");
-      hint.textContent = "Paused (tab hidden)";
-      hint.classList.remove("hidden");
+    if (!running) return;
+    if (!document.hidden){
+      // On return, catch up immediately (quick fill if needed)
+      reconcile(true);
     }
   });
 
